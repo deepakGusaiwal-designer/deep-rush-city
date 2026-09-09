@@ -1,0 +1,160 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    font-family: 'Outfit', sans-serif;
+  }
+}
+
+/* Mobile Safe Area Padding Utilities */
+.safe-top {
+  padding-top: max(0.75rem, env(safe-area-inset-top));
+}
+.safe-bottom {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+.safe-left {
+  padding-left: max(0.75rem, env(safe-area-inset-left));
+}
+.safe-right {
+  padding-right: max(0.75rem, env(safe-area-inset-right));
+}
+
+/* Custom Glassmorphism styles for HUD - sleek, lightweight & semi-transparent */
+.glass-panel {
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.25);
+}
+
+.glass-panel-glow {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.08), 0 4px 20px 0 rgba(0, 0, 0, 0.30);
+}
+
+/* Pulsing neon animations */
+@keyframes neon-pulse {
+  0%, 100% { opacity: 1; filter: drop-shadow(0 0 6px rgba(0, 240, 255, 0.8)); }
+  50% { opacity: 0.8; filter: drop-shadow(0 0 2px rgba(0, 240, 255, 0.4)); }
+}
+
+.animate-neon {
+  animation: neon-pulse 2s infinite ease-in-out;
+}
+
+/* Custom slim scrollbar for dropdown menus & modals */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 9999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 240, 255, 0.4);
+  border-radius: 9999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 240, 255, 0.8);
+}
+
+/* Allow smooth touch scrolling inside dropdowns and modals despite global touch-action: none */
+.touch-scrollable,
+.touch-pan-y {
+  touch-action: pan-y !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior: contain !important;
+}
+
+/* --- GTA splash screens ------------------------------------------------- */
+@keyframes splash-title {
+  0%   { transform: scale(1.6) translateY(10px); opacity: 0; letter-spacing: 0.6em; filter: blur(6px); }
+  35%  { transform: scale(1.0) translateY(0);    opacity: 1; letter-spacing: 0.18em; filter: blur(0); }
+  85%  { transform: scale(1.02); opacity: 1; }
+  100% { transform: scale(1.05); opacity: 0; }
+}
+.animate-splash-title { animation: splash-title 3.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
+
+@keyframes splash-sub {
+  0%, 25% { opacity: 0; transform: translateY(8px); }
+  45%     { opacity: 1; transform: translateY(0); }
+  85%     { opacity: 1; }
+  100%    { opacity: 0; }
+}
+.animate-splash-sub { animation: splash-sub 3.6s ease-out forwards; }
+
+@keyframes splash-bg {
+  0%   { background: rgba(0, 0, 0, 0); }
+  30%  { background: rgba(0, 0, 0, 0.45); }
+  85%  { background: rgba(0, 0, 0, 0.45); }
+  100% { background: rgba(0, 0, 0, 0); }
+}
+.animate-splash-bg { animation: splash-bg 3.6s ease-out forwards; }
+
+@keyframes splash-bg-dark {
+  0%   { background: rgba(0, 0, 0, 0); }
+  25%  { background: rgba(0, 0, 0, 0.55); }
+  90%  { background: rgba(0, 0, 0, 0.75); }
+  100% { background: rgba(0, 0, 0, 0); }
+}
+.animate-splash-bg-dark { animation: splash-bg-dark 4.2s ease-out forwards; }
+
+/* --- Wanted stars --------------------------------------------------------- */
+@keyframes star-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.18); }
+}
+.animate-star-pulse { animation: star-pulse 1.1s ease-in-out infinite; }
+
+@keyframes wanted-flash {
+  0%, 100% { box-shadow: 0 0 0 rgba(251, 191, 36, 0); }
+  40%      { box-shadow: 0 0 26px rgba(251, 191, 36, 0.9); transform: scale(1.08); }
+}
+.animate-wanted-flash { animation: wanted-flash 0.9s ease-out; }
+
+/* --- Notification feed --------------------------------------------------- */
+@keyframes notif-in {
+  0%   { opacity: 0; transform: translateX(-18px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+.animate-notif-in { animation: notif-in 0.25s ease-out; }
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-fade-in { animation: fade-in 0.25s ease-out; }
+
+/* --- Preloader & Logo Animations ---------------------------------------- */
+@keyframes logo-float {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+    filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.8)) drop-shadow(0 0 10px rgba(0, 240, 255, 0.35)) drop-shadow(0 0 20px rgba(255, 170, 0, 0.2));
+  }
+  50% {
+    transform: translateY(-5px) scale(1.02);
+    filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.85)) drop-shadow(0 0 16px rgba(0, 240, 255, 0.55)) drop-shadow(0 0 30px rgba(255, 170, 0, 0.35));
+  }
+}
+.animate-logo-float {
+  animation: logo-float 3.2s ease-in-out infinite;
+}
+
+

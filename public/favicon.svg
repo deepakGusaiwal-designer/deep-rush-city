@@ -1,0 +1,13 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" rx="20" fill="#0f172a" />
+  <circle cx="50" cy="50" r="40" fill="#2563eb" opacity="0.2" />
+  <!-- Stylized Sports Car Emoji / Silhouette -->
+  <path d="M22 62 L26 48 Q30 38 42 36 L58 36 Q70 38 74 48 L78 62 Z" fill="#3b82f6" />
+  <path d="M30 46 L34 39 Q38 38 48 38 L52 38 Q62 38 66 39 L70 46 Z" fill="#93c5fd" />
+  <!-- Headlights -->
+  <circle cx="28" cy="56" r="4" fill="#fef08a" />
+  <circle cx="72" cy="56" r="4" fill="#fef08a" />
+  <!-- Wheels -->
+  <circle cx="32" cy="66" r="8" fill="#1e293b" stroke="#64748b" stroke-width="2" />
+  <circle cx="68" cy="66" r="8" fill="#1e293b" stroke="#64748b" stroke-width="2" />
+</svg>
