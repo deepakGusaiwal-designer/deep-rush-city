@@ -145,6 +145,48 @@ export const App: React.FC = () => {
     };
   }, []);
 
+  // Mobile touch optimization: Prevent accidental double-tap-to-zoom and browser pinch-zoom
+  useEffect(() => {
+    let lastTouchEnd = 0;
+    const handleTouchEnd = (e: TouchEvent) => {
+      const now = Date.now();
+      if (now - lastTouchEnd <= 300) {
+        // Double-tap detected - prevent native browser page zoom
+        e.preventDefault();
+      }
+      lastTouchEnd = now;
+    };
+
+    // Safari iOS gesture events for pinch-to-zoom
+    const handleGesture = (e: Event) => {
+      e.preventDefault();
+    };
+
+    // Prevent multi-touch gesture from scaling HTML document viewport (in-game camera handles 3D zoom)
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length > 1) {
+        const target = e.target as HTMLElement | null;
+        if (!target?.closest('.touch-scrollable')) {
+          e.preventDefault();
+        }
+      }
+    };
+
+    document.addEventListener('touchend', handleTouchEnd, { passive: false });
+    document.addEventListener('gesturestart', handleGesture, { passive: false });
+    document.addEventListener('gesturechange', handleGesture, { passive: false });
+    document.addEventListener('gestureend', handleGesture, { passive: false });
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+
+    return () => {
+      document.removeEventListener('touchend', handleTouchEnd);
+      document.removeEventListener('gesturestart', handleGesture);
+      document.removeEventListener('gesturechange', handleGesture);
+      document.removeEventListener('gestureend', handleGesture);
+      document.removeEventListener('touchmove', handleTouchMove);
+    };
+  }, []);
+
   // Handle reset car position
   const handleResetCar = () => {
     if (engineRef.current) {

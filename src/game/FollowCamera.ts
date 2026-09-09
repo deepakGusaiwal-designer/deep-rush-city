@@ -42,7 +42,7 @@ export class FollowCamera {
 
     const onPointerDown = (e: PointerEvent) => {
       // Left click or touch
-      if (e.button === 0) {
+      if (e.button === 0 || e.pointerType === 'touch') {
         this.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
         if (this.primaryPointerId === null) {

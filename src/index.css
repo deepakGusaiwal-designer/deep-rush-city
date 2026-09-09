@@ -83,6 +83,16 @@
   overscroll-behavior: contain !important;
 }
 
+/* Mobile touch & gesture optimization */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button, a, [role="button"] {
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+}
+
 /* --- GTA splash screens ------------------------------------------------- */
 @keyframes splash-title {
   0%   { transform: scale(1.6) translateY(10px); opacity: 0; letter-spacing: 0.6em; filter: blur(6px); }

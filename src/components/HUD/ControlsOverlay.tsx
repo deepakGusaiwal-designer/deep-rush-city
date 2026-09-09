@@ -1,14 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useGameStore } from '../../store/useGameStore';
+import { PlayerControls } from '../../types/game';
 import {
   ChevronUp,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Volume2,
   Zap,
   Rocket,
   Car,
   RotateCcw,
   Flashlight,
+  Compass,
 } from 'lucide-react';
 
 interface VirtualThumbstickProps {
@@ -52,6 +56,8 @@ const VirtualThumbstick: React.FC<VirtualThumbstickProps> = ({ onMove, onRelease
   };
 
   const onTouchStart = (e: React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (activeTouchId.current !== null) return;
     const touch = e.changedTouches[0];
     activeTouchId.current = touch.identifier;
@@ -60,6 +66,8 @@ const VirtualThumbstick: React.FC<VirtualThumbstickProps> = ({ onMove, onRelease
   };
 
   const onTouchMove = (e: React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
       if (touch.identifier === activeTouchId.current) {
@@ -70,6 +78,23 @@ const VirtualThumbstick: React.FC<VirtualThumbstickProps> = ({ onMove, onRelease
   };
 
   const onTouchEnd = (e: React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      if (touch.identifier === activeTouchId.current) {
+        activeTouchId.current = null;
+        setIsEngaged(false);
+        setKnobPos({ x: 0, y: 0 });
+        onRelease();
+        break;
+      }
+    }
+  };
+
+  const onTouchCancel = (e: React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
       if (touch.identifier === activeTouchId.current) {
@@ -141,6 +166,121 @@ const VirtualThumbstick: React.FC<VirtualThumbstickProps> = ({ onMove, onRelease
         </div>
       </div>
     </div>
+  );
+};
+
+export const triggerHaptic = (ms: number = 10) => {
+  if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+    try {
+      navigator.vibrate(ms);
+    } catch {
+      // Safe fallback for restricted vibration environments
+    }
+  }
+};
+
+type ControlActionKey = keyof PlayerControls;
+
+interface TouchActionButtonProps {
+  action?: ControlActionKey;
+  onTap?: () => void;
+  className?: string;
+  activeClassName?: string;
+  title?: string;
+  hapticMs?: number;
+  children: React.ReactNode;
+}
+
+export const TouchActionButton: React.FC<TouchActionButtonProps> = ({
+  action,
+  onTap,
+  className = '',
+  activeClassName = '',
+  title = '',
+  hapticMs = 12,
+  children,
+}) => {
+  const setControl = useGameStore((state) => state.setControl);
+  const [isPressed, setIsPressed] = useState(false);
+  const activeTouchId = useRef<number | null>(null);
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (activeTouchId.current !== null) return;
+    const touch = e.changedTouches[0];
+    activeTouchId.current = touch.identifier;
+    setIsPressed(true);
+    triggerHaptic(hapticMs);
+    if (action) setControl(action, true);
+  };
+
+  const onTouchEnd = (e: React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      if (e.changedTouches[i].identifier === activeTouchId.current) {
+        activeTouchId.current = null;
+        setIsPressed(false);
+        if (action) setControl(action, false);
+        if (onTap) onTap();
+        break;
+      }
+    }
+  };
+
+  const onTouchCancel = (e: React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      if (e.changedTouches[i].identifier === activeTouchId.current) {
+        activeTouchId.current = null;
+        setIsPressed(false);
+        if (action) setControl(action, false);
+        break;
+      }
+    }
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse') {
+      setIsPressed(true);
+      triggerHaptic(hapticMs);
+      if (action) setControl(action, true);
+    }
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse') {
+      setIsPressed(false);
+      if (action) setControl(action, false);
+      if (onTap) onTap();
+    }
+  };
+
+  const onPointerLeave = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse' && isPressed) {
+      setIsPressed(false);
+      if (action) setControl(action, false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      title={title}
+      onTouchStart={onTouchStart}
+      onTouchMove={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchCancel}
+      onPointerDown={onPointerDown}
+      onPointerUp={onPointerUp}
+      onPointerLeave={onPointerLeave}
+      className={`${className} ${isPressed ? (activeClassName || 'scale-95 brightness-125') : ''} touch-none select-none transition-transform`}
+      style={{ touchAction: 'none', WebkitUserSelect: 'none', userSelect: 'none' }}
+    >
+      {children}
+    </button>
   );
 };
 
@@ -243,49 +383,26 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
     };
   }, [setControl, cycleCameraMode, cycleHeadlightMode, toggleDayNight, onResetCar, onToggleCabJob, onToggleCustoms, onToggleMissions, onToggleJetpack]);
 
-  const triggerHaptic = (ms: number = 10) => {
-    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-      try {
-        navigator.vibrate(ms);
-      } catch {
-        // Safe fallback for restricted vibration environments
-      }
-    }
-  };
+  // Selective store subscriptions to avoid 60fps re-renders during gameplay
+  const playerMode = useGameStore((state) => state.telemetry.playerMode ?? 'on_foot');
+  const prompt = useGameStore((state) => state.telemetry.interactionPrompt);
+  const jetpackActive = useGameStore((state) => state.telemetry.jetpackActive);
+  const jetpack = jetpackActive && playerMode === 'on_foot';
 
-  // Touch handlers with haptics & immediate zero-delay response
-  const bindTouch = (action: Parameters<typeof setControl>[0], hapticMs: number = 10) => ({
-    onTouchStart: (_e: React.TouchEvent) => {
-      triggerHaptic(hapticMs);
-      setControl(action, true);
-    },
-    onTouchEnd: (_e: React.TouchEvent) => {
-      setControl(action, false);
-    },
-    onTouchCancel: (_e: React.TouchEvent) => {
-      setControl(action, false);
-    },
-    onPointerDown: (e: React.PointerEvent) => {
-      if (e.pointerType === 'mouse') {
-        setControl(action, true);
-      }
-    },
-    onPointerUp: (e: React.PointerEvent) => {
-      if (e.pointerType === 'mouse') {
-        setControl(action, false);
-      }
-    },
-    onPointerLeave: (e: React.PointerEvent) => {
-      if (e.pointerType === 'mouse') {
-        setControl(action, false);
-      }
-    },
+  // Mobile driving steering mode: 'buttons' (dedicated Left/Right steering buttons) or 'stick' (virtual thumbstick)
+  const [drivingControlMode, setDrivingControlMode] = useState<'buttons' | 'stick'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('drc_driving_controls') as 'buttons' | 'stick') || 'buttons';
+    }
+    return 'buttons';
   });
 
-  const telemetry = useGameStore((state) => state.telemetry);
-  const playerMode = telemetry.playerMode ?? 'on_foot';
-  const prompt = telemetry.interactionPrompt;
-  const jetpack = telemetry.jetpackActive && playerMode === 'on_foot';
+  const toggleDrivingControlMode = () => {
+    triggerHaptic(15);
+    const next = drivingControlMode === 'buttons' ? 'stick' : 'buttons';
+    setDrivingControlMode(next);
+    localStorage.setItem('drc_driving_controls', next);
+  };
 
   return (
     <>
@@ -456,46 +573,82 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
 
       {/* Full-Screen Mobile Touch Controller (Visible on touch devices / screens below lg) */}
       <div className="lg:hidden fixed inset-0 pointer-events-none z-20">
-        {/* Left Thumb Cluster (Bottom Left) - Virtual Thumbstick */}
+        {/* Left Thumb Cluster (Bottom Left) */}
         <div className="fixed bottom-2.5 left-2.5 sm:bottom-3 sm:left-3 pointer-events-auto flex flex-col items-start gap-1">
           {playerMode === 'driving' && (
-            <div className="flex items-center gap-1.5 mb-0.5">
-              <button
-                {...bindTouch('horn', 15)}
-                className="px-2 h-6 rounded-lg bg-slate-950/30 backdrop-blur-sm border border-amber-400/25 flex items-center gap-1 text-amber-300/90 active:scale-90 active:bg-amber-500/30 text-[9px] font-bold shadow-sm touch-none select-none"
+            <div className="flex items-center gap-1.5 mb-1">
+              <TouchActionButton
+                action="horn"
+                className="px-2 h-6 rounded-lg bg-slate-950/40 backdrop-blur-sm border border-amber-400/30 flex items-center gap-1 text-amber-300/90 text-[9px] font-bold shadow-sm"
+                activeClassName="bg-amber-500/40 border-amber-300 text-white"
                 title="Horn (H)"
               >
                 <Volume2 className="w-3 h-3" />
                 <span>HORN</span>
-              </button>
-              <button
-                onClick={() => { triggerHaptic(15); cycleHeadlightMode(); }}
-                className={`px-2 h-6 rounded-lg bg-slate-950/30 backdrop-blur-sm border flex items-center gap-1 active:scale-90 text-[9px] font-bold shadow-sm touch-none select-none transition-all ${
+              </TouchActionButton>
+              <TouchActionButton
+                onTap={() => { triggerHaptic(15); cycleHeadlightMode(); }}
+                className={`px-2 h-6 rounded-lg bg-slate-950/40 backdrop-blur-sm border flex items-center gap-1 text-[9px] font-bold shadow-sm ${
                   headlightMode === 'high'
-                    ? 'border-cyan-400/60 bg-cyan-500/25 text-cyan-200 ring-1 ring-cyan-400/50'
+                    ? 'border-cyan-400/70 bg-cyan-500/30 text-cyan-200 ring-1 ring-cyan-400/50'
                     : headlightMode === 'low'
-                    ? 'border-amber-400/40 bg-amber-500/20 text-amber-200'
-                    : 'border-white/10 text-gray-400'
+                    ? 'border-amber-400/50 bg-amber-500/25 text-amber-200'
+                    : 'border-white/15 text-gray-400'
                 }`}
                 title="Toggle Headlights (L)"
               >
                 <Flashlight className="w-3 h-3" />
                 <span className="uppercase">{headlightMode === 'off' ? 'OFF' : headlightMode === 'low' ? 'LOW' : 'HIGH'}</span>
-              </button>
-              <button
-                onClick={() => { triggerHaptic(15); onResetCar(); }}
-                className="px-2 h-6 rounded-lg bg-slate-950/30 backdrop-blur-sm border border-white/10 flex items-center gap-1 text-gray-300 active:scale-90 active:bg-white/20 text-[9px] font-bold shadow-sm touch-none select-none"
+              </TouchActionButton>
+              <TouchActionButton
+                onTap={() => { triggerHaptic(15); onResetCar(); }}
+                className="px-2 h-6 rounded-lg bg-slate-950/40 backdrop-blur-sm border border-white/15 flex items-center gap-1 text-gray-300 text-[9px] font-bold shadow-sm"
+                activeClassName="bg-white/30 text-white"
                 title="Reset Car (R)"
               >
                 <RotateCcw className="w-3 h-3" />
                 <span>RESET</span>
+              </TouchActionButton>
+              <button
+                type="button"
+                onClick={toggleDrivingControlMode}
+                className="px-2 h-6 rounded-lg bg-cyan-950/40 backdrop-blur-sm border border-cyan-400/30 flex items-center gap-1 text-cyan-300 text-[9px] font-bold shadow-sm touch-none select-none active:scale-90"
+                title="Switch between Steering Buttons and Thumbstick"
+              >
+                <Compass className="w-3 h-3 text-cyan-400" />
+                <span>{drivingControlMode === 'buttons' ? 'STICK' : 'KEYS'}</span>
               </button>
             </div>
           )}
-          <VirtualThumbstick
-            onMove={(x, y) => setAnalogInput(x, y)}
-            onRelease={() => setAnalogInput(0, 0)}
-          />
+
+          {playerMode === 'driving' && drivingControlMode === 'buttons' ? (
+            /* Dedicated Left / Right Steering Buttons (Arcade GTA Mobile Style) */
+            <div className="flex items-center gap-2">
+              <TouchActionButton
+                action="left"
+                className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-cyan-950/35 border-2 border-cyan-400/40 flex flex-col items-center justify-center text-cyan-200 shadow-[0_0_12px_rgba(0,240,255,0.15)] backdrop-blur-sm"
+                activeClassName="bg-cyan-500/50 border-cyan-300 text-white shadow-[0_0_20px_rgba(0,240,255,0.5)] ring-2 ring-cyan-300 scale-95"
+                title="Steer Left (A)"
+              >
+                <ChevronLeft className="w-7 h-7 sm:w-8 sm:h-8 stroke-[2.5]" />
+                <span className="text-[8px] font-black tracking-wider">LEFT</span>
+              </TouchActionButton>
+              <TouchActionButton
+                action="right"
+                className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-cyan-950/35 border-2 border-cyan-400/40 flex flex-col items-center justify-center text-cyan-200 shadow-[0_0_12px_rgba(0,240,255,0.15)] backdrop-blur-sm"
+                activeClassName="bg-cyan-500/50 border-cyan-300 text-white shadow-[0_0_20px_rgba(0,240,255,0.5)] ring-2 ring-cyan-300 scale-95"
+                title="Steer Right (D)"
+              >
+                <ChevronRight className="w-7 h-7 sm:w-8 sm:h-8 stroke-[2.5]" />
+                <span className="text-[8px] font-black tracking-wider">RIGHT</span>
+              </TouchActionButton>
+            </div>
+          ) : (
+            <VirtualThumbstick
+              onMove={(x, y) => setAnalogInput(x, y)}
+              onRelease={() => setAnalogInput(0, 0)}
+            />
+          )}
         </div>
 
         {/* Right Thumb Cluster (Bottom Right) */}
@@ -505,47 +658,52 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
             <div className="flex flex-col items-end gap-1.5">
               {/* Secondary driving actions row */}
               <div className="flex items-center gap-1.5">
-                <button
-                  {...bindTouch('interact', 12)}
-                  className="px-2 h-6 rounded-lg bg-slate-950/35 border border-cyan-400/40 flex items-center justify-center text-cyan-300 font-bold text-[9px] uppercase active:scale-95 active:bg-cyan-500/30 shadow-sm backdrop-blur-sm touch-none select-none"
+                <TouchActionButton
+                  action="interact"
+                  className="px-2.5 h-6 rounded-lg bg-slate-950/40 border border-cyan-400/40 flex items-center justify-center text-cyan-300 font-bold text-[9px] uppercase shadow-sm backdrop-blur-sm"
+                  activeClassName="bg-cyan-500/50 border-cyan-300 text-white"
                   title="Exit Car (E)"
                 >
                   EXIT
-                </button>
-                <button
-                  {...bindTouch('boost', 15)}
-                  className="w-8 h-6 rounded-lg bg-slate-950/35 border border-cyan-400/35 flex items-center justify-center text-cyan-300 active:scale-95 active:bg-cyan-500/30 shadow-sm backdrop-blur-sm touch-none select-none"
+                </TouchActionButton>
+                <TouchActionButton
+                  action="boost"
+                  className="w-9 h-6 rounded-lg bg-slate-950/40 border border-cyan-400/40 flex items-center justify-center text-cyan-300 shadow-sm backdrop-blur-sm"
+                  activeClassName="bg-cyan-500/50 border-cyan-300 text-white shadow-[0_0_15px_rgba(0,240,255,0.5)]"
                   title="Nitro Boost (Shift)"
                 >
-                  <Zap className="w-3 h-3 text-cyan-300" />
-                </button>
-                <button
-                  {...bindTouch('handbrake', 15)}
-                  className="px-2 h-6 rounded-lg bg-slate-950/35 border border-amber-400/35 flex items-center justify-center text-amber-300 font-bold text-[9px] uppercase active:scale-95 active:bg-amber-500/30 shadow-sm backdrop-blur-sm touch-none select-none"
+                  <Zap className="w-3.5 h-3.5 text-cyan-300" />
+                </TouchActionButton>
+                <TouchActionButton
+                  action="handbrake"
+                  className="px-2.5 h-6 rounded-lg bg-slate-950/40 border border-amber-400/40 flex items-center justify-center text-amber-300 font-bold text-[9px] uppercase shadow-sm backdrop-blur-sm"
+                  activeClassName="bg-amber-500/50 border-amber-300 text-white shadow-[0_0_15px_rgba(251,191,36,0.5)]"
                   title="Drift (Space)"
                 >
                   DRIFT
-                </button>
+                </TouchActionButton>
               </div>
 
               {/* Primary Pedals */}
-              <div className="flex items-end gap-1.5">
-                <button
-                  {...bindTouch('backward', 10)}
-                  className="w-10 h-12 sm:w-11 sm:h-13 rounded-xl bg-rose-950/25 border border-rose-500/30 flex flex-col items-center justify-center text-rose-300 font-bold text-[10px] uppercase active:scale-95 active:bg-rose-500/35 backdrop-blur-sm shadow-sm touch-none select-none"
+              <div className="flex items-end gap-2">
+                <TouchActionButton
+                  action="backward"
+                  className="w-12 h-14 sm:w-13 sm:h-15 rounded-xl bg-rose-950/30 border-2 border-rose-500/40 flex flex-col items-center justify-center text-rose-300 font-bold text-[10px] uppercase backdrop-blur-sm shadow-sm"
+                  activeClassName="bg-rose-600/55 border-rose-400 text-white shadow-[0_0_20px_rgba(244,63,94,0.5)] scale-95"
                   title="Brake / Reverse (S)"
                 >
-                  <ChevronDown className="w-4 h-4" />
-                  <span className="text-[7px] font-bold tracking-wider">BRAKE</span>
-                </button>
-                <button
-                  {...bindTouch('forward', 12)}
-                  className="w-12 h-14 sm:w-13 sm:h-15 rounded-xl bg-cyan-500/25 border border-cyan-400/40 text-cyan-200 flex flex-col items-center justify-center font-black text-xs uppercase shadow-md active:scale-95 active:bg-cyan-500/50 backdrop-blur-sm touch-none select-none"
+                  <ChevronDown className="w-5 h-5 stroke-[2.5]" />
+                  <span className="text-[7.5px] font-bold tracking-wider">BRAKE</span>
+                </TouchActionButton>
+                <TouchActionButton
+                  action="forward"
+                  className="w-14 h-16 sm:w-15 sm:h-17 rounded-xl bg-cyan-500/25 border-2 border-cyan-400/50 text-cyan-200 flex flex-col items-center justify-center font-black text-xs uppercase shadow-md backdrop-blur-sm"
+                  activeClassName="bg-cyan-500/65 border-cyan-300 text-white shadow-[0_0_25px_rgba(0,240,255,0.6)] ring-2 ring-cyan-300 scale-95"
                   title="Gas / Accelerate (W)"
                 >
-                  <ChevronUp className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2.5]" />
-                  <span className="text-[8px] font-black tracking-wider">GAS</span>
-                </button>
+                  <ChevronUp className="w-6 h-6 sm:w-7 sm:h-7 stroke-[2.5]" />
+                  <span className="text-[8.5px] font-black tracking-wider">GAS</span>
+                </TouchActionButton>
               </div>
             </div>
           ) : jetpack ? (
@@ -553,41 +711,45 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
             <div className="flex flex-col items-end gap-1.5">
               {/* Secondary flight actions row */}
               <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => { triggerHaptic(15); onToggleJetpack?.(); }}
-                  className="px-2 h-6 rounded-lg bg-orange-500/40 text-orange-200 border border-orange-400/50 flex items-center justify-center font-bold text-[9px] uppercase active:scale-95 backdrop-blur-sm shadow-sm touch-none select-none"
+                <TouchActionButton
+                  onTap={() => { triggerHaptic(15); onToggleJetpack?.(); }}
+                  className="px-2.5 h-6 rounded-lg bg-orange-500/40 text-orange-200 border border-orange-400/50 flex items-center justify-center font-bold text-[9px] uppercase backdrop-blur-sm shadow-sm"
+                  activeClassName="bg-orange-500/70 border-orange-300 text-white"
                   title="Stow Jetpack (J)"
                 >
                   STOW
-                </button>
-                <button
-                  {...bindTouch('boost', 15)}
-                  className="px-2 h-6 rounded-lg bg-slate-950/35 border border-cyan-400/35 flex items-center justify-center text-cyan-300 font-bold text-[9px] uppercase active:scale-95 active:bg-cyan-500/30 backdrop-blur-sm shadow-sm touch-none select-none"
+                </TouchActionButton>
+                <TouchActionButton
+                  action="boost"
+                  className="px-2.5 h-6 rounded-lg bg-slate-950/40 border border-cyan-400/40 flex items-center justify-center text-cyan-300 font-bold text-[9px] uppercase backdrop-blur-sm shadow-sm"
+                  activeClassName="bg-cyan-500/50 border-cyan-300 text-white shadow-[0_0_15px_rgba(0,240,255,0.5)]"
                   title="Afterburner Boost (Shift)"
                 >
                   <Zap className="w-3 h-3 mr-1" />
                   <span>BOOST</span>
-                </button>
+                </TouchActionButton>
               </div>
 
               {/* Vertical Thrusters */}
-              <div className="flex items-end gap-1.5">
-                <button
-                  {...bindTouch('descend', 10)}
-                  className="w-10 h-12 sm:w-11 sm:h-13 rounded-xl bg-amber-950/25 border border-amber-500/30 flex flex-col items-center justify-center text-amber-300 font-bold text-[10px] uppercase active:scale-95 active:bg-amber-500/30 backdrop-blur-sm shadow-sm touch-none select-none"
+              <div className="flex items-end gap-2">
+                <TouchActionButton
+                  action="descend"
+                  className="w-12 h-14 sm:w-13 sm:h-15 rounded-xl bg-amber-950/30 border-2 border-amber-500/40 flex flex-col items-center justify-center text-amber-300 font-bold text-[10px] uppercase backdrop-blur-sm shadow-sm"
+                  activeClassName="bg-amber-600/55 border-amber-300 text-white shadow-[0_0_20px_rgba(245,158,11,0.5)] scale-95"
                   title="Descend (Ctrl)"
                 >
-                  <ChevronDown className="w-4 h-4" />
-                  <span className="text-[7px] font-bold">DOWN</span>
-                </button>
-                <button
-                  {...bindTouch('handbrake', 15)}
-                  className="w-12 h-14 sm:w-13 sm:h-15 rounded-xl bg-orange-500/25 border border-orange-400/40 text-orange-200 flex flex-col items-center justify-center font-black text-xs uppercase shadow-md active:scale-95 active:bg-orange-500/50 backdrop-blur-sm touch-none select-none"
+                  <ChevronDown className="w-5 h-5 stroke-[2.5]" />
+                  <span className="text-[7.5px] font-bold">DOWN</span>
+                </TouchActionButton>
+                <TouchActionButton
+                  action="handbrake"
+                  className="w-14 h-16 sm:w-15 sm:h-17 rounded-xl bg-orange-500/25 border-2 border-orange-400/50 text-orange-200 flex flex-col items-center justify-center font-black text-xs uppercase shadow-md backdrop-blur-sm"
+                  activeClassName="bg-orange-500/65 border-orange-300 text-white shadow-[0_0_25px_rgba(249,115,22,0.6)] ring-2 ring-orange-300 scale-95"
                   title="Rocket Thrust (Space)"
                 >
-                  <Rocket className="w-5 h-5 sm:w-6 sm:h-6" />
-                  <span className="text-[8px] font-black">THRUST</span>
-                </button>
+                  <Rocket className="w-6 h-6 sm:w-7 sm:h-7" />
+                  <span className="text-[8.5px] font-black">THRUST</span>
+                </TouchActionButton>
               </div>
             </div>
           ) : (
@@ -595,46 +757,50 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
             <div className="flex flex-col items-end gap-1.5">
               {/* Secondary on-foot actions row */}
               <div className="flex items-center gap-1.5">
-                <button
-                  {...bindTouch('interact', 15)}
-                  className={`px-2 h-6 rounded-lg border flex items-center justify-center font-bold text-[9px] uppercase active:scale-95 transition-all shadow-sm touch-none select-none backdrop-blur-sm ${
+                <TouchActionButton
+                  action="interact"
+                  className={`px-2.5 h-6 rounded-lg border flex items-center justify-center font-bold text-[9px] uppercase transition-all shadow-sm backdrop-blur-sm ${
                     prompt
-                      ? 'bg-cyan-500/40 text-cyan-200 border-cyan-400 animate-pulse'
-                      : 'bg-slate-950/35 text-cyan-300 border-cyan-400/30'
+                      ? 'bg-cyan-500/40 text-cyan-100 border-cyan-400 ring-1 ring-cyan-400 animate-pulse'
+                      : 'bg-slate-950/40 text-cyan-300 border-cyan-400/30'
                   }`}
+                  activeClassName="bg-cyan-500/65 text-white border-cyan-300"
                   title="Enter Vehicle (E)"
                 >
-                  <Car className="w-3 h-3 mr-1" />
+                  <Car className="w-3.5 h-3.5 mr-1" />
                   <span>ENTER</span>
-                </button>
-                <button
-                  onClick={() => { triggerHaptic(15); onToggleJetpack?.(); }}
-                  className="px-2 h-6 rounded-lg bg-slate-950/35 border border-orange-500/35 flex items-center justify-center text-orange-300 font-bold text-[9px] uppercase active:scale-95 active:bg-orange-500/30 backdrop-blur-sm shadow-sm touch-none select-none"
+                </TouchActionButton>
+                <TouchActionButton
+                  onTap={() => { triggerHaptic(15); onToggleJetpack?.(); }}
+                  className="px-2.5 h-6 rounded-lg bg-slate-950/40 border border-orange-500/40 flex items-center justify-center text-orange-300 font-bold text-[9px] uppercase backdrop-blur-sm shadow-sm"
+                  activeClassName="bg-orange-500/50 border-orange-300 text-white"
                   title="Equip Jetpack (J)"
                 >
-                  <Rocket className="w-3 h-3 mr-1 text-orange-400" />
+                  <Rocket className="w-3.5 h-3.5 mr-1 text-orange-400" />
                   <span>JETPACK</span>
-                </button>
+                </TouchActionButton>
               </div>
 
               {/* Primary Jump & Sprint buttons */}
-              <div className="flex items-end gap-1.5">
-                <button
-                  {...bindTouch('boost', 10)}
-                  className="w-11 h-11 sm:w-12 sm:h-12 aspect-square rounded-xl bg-slate-950/35 border border-cyan-400/30 flex flex-col items-center justify-center text-cyan-300 font-bold uppercase active:scale-95 active:bg-cyan-500/30 backdrop-blur-sm shadow-sm touch-none select-none"
+              <div className="flex items-end gap-2">
+                <TouchActionButton
+                  action="boost"
+                  className="w-13 h-13 sm:w-14 sm:h-14 aspect-square rounded-2xl bg-slate-950/40 border-2 border-cyan-400/40 flex flex-col items-center justify-center text-cyan-300 font-bold uppercase backdrop-blur-sm shadow-sm"
+                  activeClassName="bg-cyan-500/50 border-cyan-300 text-white shadow-[0_0_20px_rgba(0,240,255,0.5)] scale-95"
                   title="Sprint (Shift)"
                 >
-                  <Zap className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                  <span className="text-[7px] font-bold">SPRINT</span>
-                </button>
-                <button
-                  {...bindTouch('handbrake', 15)}
-                  className="w-11 h-11 sm:w-12 sm:h-12 aspect-square rounded-xl bg-emerald-500/25 border border-emerald-400/40 text-emerald-200 flex flex-col items-center justify-center font-black uppercase shadow-md active:scale-95 active:bg-emerald-500/50 backdrop-blur-sm touch-none select-none"
+                  <Zap className="w-4 h-4 sm:w-5 sm:h-5" />
+                  <span className="text-[7.5px] font-bold">SPRINT</span>
+                </TouchActionButton>
+                <TouchActionButton
+                  action="handbrake"
+                  className="w-13 h-13 sm:w-14 sm:h-14 aspect-square rounded-2xl bg-emerald-500/25 border-2 border-emerald-400/50 text-emerald-200 flex flex-col items-center justify-center font-black uppercase shadow-md backdrop-blur-sm"
+                  activeClassName="bg-emerald-500/65 border-emerald-300 text-white shadow-[0_0_25px_rgba(16,185,129,0.6)] ring-2 ring-emerald-300 scale-95"
                   title="Jump (Space)"
                 >
-                  <ChevronUp className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
-                  <span className="text-[7px] font-black">JUMP</span>
-                </button>
+                  <ChevronUp className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2.5]" />
+                  <span className="text-[7.5px] font-black">JUMP</span>
+                </TouchActionButton>
               </div>
             </div>
           )}

@@ -604,11 +604,12 @@ export class VehicleController {
     const maxSteer = 0.55 * speedSteerDamp * (0.85 + (stats.handling / 100) * 0.3);
     let targetSteer = 0;
     if (controls.analogX !== undefined && Math.abs(controls.analogX) > 0.05) {
-      targetSteer = -controls.analogX * maxSteer;
-    } else {
-      if (controls.left) targetSteer += maxSteer;
-      if (controls.right) targetSteer -= maxSteer;
+      targetSteer -= controls.analogX * maxSteer;
     }
+    if (controls.left) targetSteer += maxSteer;
+    if (controls.right) targetSteer -= maxSteer;
+    targetSteer = THREE.MathUtils.clamp(targetSteer, -maxSteer, maxSteer);
+
     // Quick rack: reaches lock in ~0.25 s, self-centres faster still, so taps register immediately
     const steerRate = targetSteer !== 0 ? 11.0 : 15.0;
     this.currentSteerAngle += (targetSteer - this.currentSteerAngle) * Math.min(dt * steerRate, 1.0);
@@ -617,9 +618,12 @@ export class VehicleController {
     let throttle = 0;
     let brake = 0;
     let reverse = 0;
-    if (controls.forward) {
+    const wantsForward = Boolean(controls.forward) || (controls.analogY !== undefined && controls.analogY < -0.25);
+    const wantsBackward = Boolean(controls.backward) || (controls.analogY !== undefined && controls.analogY > 0.25);
+
+    if (wantsForward) {
       if (vx < -0.5) brake = 1; else throttle = 1;
-    } else if (controls.backward) {
+    } else if (wantsBackward) {
       if (vx > 0.5) brake = 1; else reverse = 1;
     }
     const handbrake = Boolean(controls.handbrake);

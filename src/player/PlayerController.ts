@@ -245,16 +245,20 @@ export class PlayerController {
 
     const hasAnalog = controls.analogX !== undefined && controls.analogY !== undefined && (controls.analogX !== 0 || controls.analogY !== 0);
     if (hasAnalog) {
-      inputRight = controls.analogX!;
-      inputForward = -controls.analogY!;
-    } else {
-      if (controls.forward) inputForward += 1;
-      if (controls.backward) inputForward -= 1;
-      if (controls.right) inputRight += 1;
-      if (controls.left) inputRight -= 1;
+      inputRight += controls.analogX!;
+      inputForward -= controls.analogY!;
     }
+    if (controls.forward) inputForward += 1;
+    if (controls.backward) inputForward -= 1;
+    if (controls.right) inputRight += 1;
+    if (controls.left) inputRight -= 1;
 
-    const inputLen = Math.hypot(inputForward, inputRight);
+    const rawLen = Math.hypot(inputForward, inputRight);
+    if (rawLen > 1.0) {
+      inputForward /= rawLen;
+      inputRight /= rawLen;
+    }
+    const inputLen = Math.min(1.0, rawLen);
     this.isSprinting = Boolean((controls.boost || (hasAnalog && inputLen > 0.88)) && inputLen > 0.1);
 
     const targetMaxSpeed = this.isSprinting
@@ -404,15 +408,20 @@ export class PlayerController {
 
     const hasAnalog = controls.analogX !== undefined && controls.analogY !== undefined && (controls.analogX !== 0 || controls.analogY !== 0);
     if (hasAnalog) {
-      inputRight = controls.analogX!;
-      inputForward = -controls.analogY!;
-    } else {
-      if (controls.forward) inputForward += 1;
-      if (controls.backward) inputForward -= 1;
-      if (controls.right) inputRight += 1;
-      if (controls.left) inputRight -= 1;
+      inputRight += controls.analogX!;
+      inputForward -= controls.analogY!;
     }
-    const inputLen = Math.hypot(inputForward, inputRight);
+    if (controls.forward) inputForward += 1;
+    if (controls.backward) inputForward -= 1;
+    if (controls.right) inputRight += 1;
+    if (controls.left) inputRight -= 1;
+
+    const rawLen = Math.hypot(inputForward, inputRight);
+    if (rawLen > 1.0) {
+      inputForward /= rawLen;
+      inputRight /= rawLen;
+    }
+    const inputLen = Math.min(1.0, rawLen);
 
     const hasFuel = this.fuel > 0;
     this.isAfterburner = Boolean((controls.boost || (hasAnalog && inputLen > 0.88))) && inputLen > 0.1 && hasFuel && !this.isGrounded;

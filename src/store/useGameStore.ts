@@ -461,10 +461,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       ...state.controls,
       analogX: x,
       analogY: y,
-      forward: y < -0.25,
-      backward: y > 0.25,
-      left: x < -0.25,
-      right: x > 0.25,
     }
   })),
   resetControls: () => set({
