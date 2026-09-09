@@ -51,6 +51,7 @@ export class PlayerController {
   private previousHeading: number = 0;
   private landingSquash: number = 0;
   private landingSquashVel: number = 0;
+  private footstepTimer: number = 0;
 
   // Downward raycasting for accurate terrain/rooftop/slope surface elevation
   private downRaycaster = new THREE.Raycaster();
@@ -323,10 +324,23 @@ export class PlayerController {
     const targetBank = THREE.MathUtils.clamp(-turnRate * 0.045 * (horizSpeed / PlayerController.SPRINT_SPEED), -0.25, 0.25);
     this.bankAngle += (targetBank - this.bankAngle) * Math.min(1.0, dt * 12.0);
 
+    // Dynamic asphalt footsteps with cadence
+    if (this.isGrounded && horizSpeed > 0.8) {
+      const stepInterval = this.isSprinting ? 0.28 : 0.38;
+      this.footstepTimer -= dt;
+      if (this.footstepTimer <= 0) {
+        this.footstepTimer = stepInterval;
+        audioManager.playFootstep(this.isSprinting);
+      }
+    } else {
+      this.footstepTimer = 0.08;
+    }
+
     // 2. Jump & Gravity
     if (this.isGrounded && controls.handbrake) {
       this.velocity.y = PlayerController.JUMP_VEL;
       this.isGrounded = false;
+      audioManager.playJump();
     }
 
     this.velocity.y += PlayerController.GRAVITY * dt;
@@ -344,6 +358,7 @@ export class PlayerController {
       if (!wasGrounded && this.velocity.y < -1.5) {
         // Compute landing squash impact force
         this.landingSquashVel = Math.min(0.35, 0.05 + Math.abs(this.velocity.y) * 0.025);
+        audioManager.playLand(Math.abs(this.velocity.y));
         if (this.velocity.y < -11 && this.onHardLanding) this.onHardLanding(-this.velocity.y);
       }
       this.velocity.y = 0;

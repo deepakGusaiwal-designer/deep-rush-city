@@ -36,7 +36,7 @@ export class VehicleController {
   public chassisGroup: THREE.Group;
   public lightsGroup: THREE.Group;
 
-  private currentVehicleId: VehicleModelId = 'Car_06';
+  public currentVehicleId: VehicleModelId = 'Car_06';
   private currentStats: VehicleStats;
 
   // Wheel meshes
@@ -65,6 +65,8 @@ export class VehicleController {
   public frontSlipAngle: number = 0;
   public isDrifting: boolean = false;
   public isWheelspin: boolean = false;
+  private prevHandbrake: boolean = false;
+  private prevWheelspin: boolean = false;
   public driftScore: number = 0;
 
   // Damage model
@@ -787,12 +789,31 @@ export class VehicleController {
       this.driftScore += Math.round(absVx * dt * 25);
     }
 
-    audioManager.setDrifting(this.isDrifting || this.isWheelspin);
+    // Dynamic tire screech modulated with slip angle and speed
+    const totalSlip = Math.abs(rearSlip) + Math.abs(frontSlip) * 0.5;
+    audioManager.setDrifting(this.isDrifting || this.isWheelspin, totalSlip, Math.abs(this.speedKmh));
     audioManager.playHorn(controls.horn);
+
+    // Mechanical handbrake click on engage
+    if (handbrake && !this.prevHandbrake) {
+      audioManager.playHandbrakeClick();
+    }
+    this.prevHandbrake = handbrake;
+
+    // Tire burnout launch chirp
+    if (this.isWheelspin && !this.prevWheelspin && absVx < 2.5 && controls.forward) {
+      audioManager.playTireBurnoutChirp();
+    }
+    this.prevWheelspin = this.isWheelspin;
 
     // Telemetry speed in KM/H
     this.speedKmh = Math.round(vx * 3.6);
-    audioManager.updateEngine(this.isWrecked ? 0 : this.speedKmh, (controls.forward || controls.boost) && !this.isWrecked);
+    audioManager.updateEngine(
+      this.isWrecked ? 0 : this.speedKmh,
+      (controls.forward || controls.boost) && !this.isWrecked,
+      controls.boost && !this.isWrecked,
+      this.currentVehicleId
+    );
 
     // --- Wheel animation -----------------------------------------------------
     const wheelRadius = 0.40;

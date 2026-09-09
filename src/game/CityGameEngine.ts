@@ -858,6 +858,7 @@ export class CityGameEngine {
         if (hijackedId) {
           this.switchVehicle(hijackedId);
         }
+        audioManager.startEngine(hijackedId || this.vehicleController.currentVehicleId);
         this.playerMode = 'driving';
       });
     } else if (this.playerMode === 'on_foot' && isArrestScene) {
@@ -1237,6 +1238,7 @@ export class CityGameEngine {
 
   public setDayNightMode(mode: DayNightMode) {
     this.lastDayNightMode = mode;
+    audioManager.setDayNightAmbience(mode === 'night');
     this.dynamicSky.setMode(mode, true);
     this.lightingManager.applyMode(mode);
     this.cityEnv.setDayNightVisuals(mode);

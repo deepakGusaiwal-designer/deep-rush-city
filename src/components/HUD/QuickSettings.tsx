@@ -74,6 +74,7 @@ export const QuickSettings: React.FC<QuickSettingsProps> = ({
 
   const handleDayNightClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     (e.currentTarget as HTMLElement)?.blur();
+    audioManager.playUiClick();
     if (isAutoTimeCycle) toggleAutoTimeCycle();
     toggleDayNight();
     onApplyLighting();
@@ -81,6 +82,7 @@ export const QuickSettings: React.FC<QuickSettingsProps> = ({
 
   const handleGraphicsClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     (e.currentTarget as HTMLElement)?.blur();
+    audioManager.playUiClick();
     cycleGraphicsQuality();
     onApplyGraphics();
   };
@@ -93,11 +95,13 @@ export const QuickSettings: React.FC<QuickSettingsProps> = ({
 
   const handleCameraClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     (e.currentTarget as HTMLElement)?.blur();
+    audioManager.playUiClick();
     cycleCameraMode();
   };
 
   const handleResetClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     (e.currentTarget as HTMLElement)?.blur();
+    audioManager.playUiClick();
     onResetCar();
   };
 

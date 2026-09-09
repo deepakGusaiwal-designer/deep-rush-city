@@ -183,6 +183,7 @@ export class VehicleInteraction {
     if (t >= 0.72 && !this.ignitionPlayed) {
       this.ignitionPlayed = true;
       audioManager.playEngineIgnition();
+      audioManager.startEngine(this.vehicleController.currentVehicleId);
       this.lightingManager?.flashHeadlights(450);
       this.vehicleController.applyChassisImpulse(0.03, 0.02);
     }
@@ -277,6 +278,7 @@ export class VehicleInteraction {
     // Car suspension springs upward as driver weight leaves
     this.vehicleController.applyChassisImpulse(-0.04, 0.08);
 
+    audioManager.stopEngine();
     audioManager.playDoorLatch();
     setTimeout(() => {
       audioManager.playDoorSlam();
