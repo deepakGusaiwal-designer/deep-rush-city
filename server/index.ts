@@ -19,15 +19,21 @@ const io = new Server(server, {
 
 setupSocketServer(io);
 
+// Health check endpoint for Render monitoring
+app.get('/health', (_req, res) => {
+  res.status(200).json({ status: 'ok', game: 'Deep Rush City', onlinePlayers: io.engine.clientsCount, time: Date.now() });
+});
+
 // Serve built frontend assets in production
 const distPath = path.join(__dirname, '../dist');
 app.use(express.static(distPath));
 
-app.get('*', (req, res) => {
+// Express 5 compatible SPA fallback
+app.use((_req, res) => {
   res.sendFile(path.join(distPath, 'index.html'));
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🎮 Deep Rush City Multiplayer Server listening on http://localhost:${PORT}`);
+const PORT = Number(process.env.PORT) || 3001;
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🎮 Deep Rush City Multiplayer Server listening on http://0.0.0.0:${PORT}`);
 });

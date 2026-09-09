@@ -54,6 +54,8 @@ export const App: React.FC = () => {
   const [onlineCount, setOnlineCount] = useState<number>(1);
   const [inspectedCar, setInspectedCar] = useState<CarMeetInspectData | null>(null);
   const [playerName, setPlayerName] = useState<string>('Driver');
+  const [isMultiplayerConnected, setIsMultiplayerConnected] = useState<boolean>(false);
+  const [serverUrl, setServerUrl] = useState<string>('');
 
   useEffect(() => {
     if (!canvasContainerRef.current) return;
@@ -74,10 +76,16 @@ export const App: React.FC = () => {
     setWebglError(null);
     engineRef.current = engine;
     setPlayerName(engine.multiplayerClient.playerName);
+    setServerUrl(engine.multiplayerClient.activeServerUrl);
+    setIsMultiplayerConnected(engine.multiplayerClient.isConnected);
 
     // Wire multiplayer callbacks to React HUD
     engine.onChatMessagesChanged = (msgs) => setChatMessages([...msgs]);
-    engine.onMultiplayerConnectionChanged = (_connected, count) => setOnlineCount(count);
+    engine.onMultiplayerConnectionChanged = (connected, count) => {
+      setIsMultiplayerConnected(connected);
+      setOnlineCount(count);
+      setServerUrl(engine.multiplayerClient.activeServerUrl);
+    };
     engine.onInspectedCarChanged = (data) => setInspectedCar(data);
 
     if (import.meta.env.DEV) {
@@ -228,6 +236,17 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleChangeServerUrl = (newUrl: string) => {
+    if (engineRef.current) {
+      engineRef.current.multiplayerClient.setServerUrl(newUrl);
+      setServerUrl(engineRef.current.multiplayerClient.activeServerUrl);
+      useGameStore.getState().pushNotification(
+        newUrl ? `Connecting to ${newUrl}...` : 'Reset to auto-detected server',
+        'info'
+      );
+    }
+  };
+
   const handleTeleportToCarMeet = () => {
     engineRef.current?.teleportToCarMeet();
   };
@@ -349,6 +368,9 @@ export const App: React.FC = () => {
                 onlineCount={onlineCount}
                 playerName={playerName}
                 onChangePlayerName={handleChangePlayerName}
+                isMultiplayerConnected={isMultiplayerConnected}
+                serverUrl={serverUrl}
+                onChangeServerUrl={handleChangeServerUrl}
               />
               <WantedStars />
             </div>

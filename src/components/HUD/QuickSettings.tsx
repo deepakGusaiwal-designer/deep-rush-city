@@ -21,6 +21,9 @@ interface QuickSettingsProps {
   onlineCount?: number;
   playerName?: string;
   onChangePlayerName?: (name: string) => void;
+  isMultiplayerConnected?: boolean;
+  serverUrl?: string;
+  onChangeServerUrl?: (url: string) => void;
 }
 
 export const QuickSettings: React.FC<QuickSettingsProps> = ({
@@ -39,6 +42,9 @@ export const QuickSettings: React.FC<QuickSettingsProps> = ({
   onlineCount = 1,
   playerName = 'Driver',
   onChangePlayerName,
+  isMultiplayerConnected,
+  serverUrl,
+  onChangeServerUrl,
 }) => {
   const dayNightMode = useGameStore((state) => state.dayNightMode);
   const toggleDayNight = useGameStore((state) => state.toggleDayNight);
@@ -114,6 +120,9 @@ export const QuickSettings: React.FC<QuickSettingsProps> = ({
         onlineCount={onlineCount}
         playerName={playerName}
         onChangePlayerName={onChangePlayerName}
+        isMultiplayerConnected={isMultiplayerConnected}
+        serverUrl={serverUrl}
+        onChangeServerUrl={onChangeServerUrl}
       />
 
       {/* Live Multiplayer Lobby Pill */}

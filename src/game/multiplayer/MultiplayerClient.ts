@@ -59,12 +59,65 @@ export class MultiplayerClient {
     }
   }
 
+  public activeServerUrl: string = '';
+
+  public resolveTargetUrl(explicitUrl?: string): string {
+    if (explicitUrl && explicitUrl.trim()) {
+      return explicitUrl.trim();
+    }
+    // 1. Check localStorage for user-entered server URL
+    try {
+      const stored = localStorage.getItem('deep_rush_server_url');
+      if (stored && stored.trim()) return stored.trim();
+    } catch (_) {}
+
+    // 2. Check Vite environment variable (e.g. set in Vercel or .env)
+    const envUrl = (import.meta as any).env?.VITE_SOCKET_SERVER_URL;
+    if (envUrl && envUrl.trim()) return envUrl.trim();
+
+    // 3. Fallback based on runtime environment:
+    if (typeof window !== 'undefined') {
+      const { hostname, protocol } = window.location;
+      // Local development on Vite (default port 3000) -> server is on 3001
+      if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        return `${protocol}//${hostname}:3001`;
+      }
+      // If served directly from Render (*.onrender.com) or custom domain
+      return window.location.origin;
+    }
+
+    return 'http://localhost:3001';
+  }
+
+  public setServerUrl(newUrl: string) {
+    const clean = newUrl.trim();
+    try {
+      if (clean) {
+        localStorage.setItem('deep_rush_server_url', clean);
+      } else {
+        localStorage.removeItem('deep_rush_server_url');
+      }
+    } catch (_) {}
+    this.reconnect(clean || undefined);
+  }
+
+  public reconnect(overrideUrl?: string) {
+    if (this.socket) {
+      this.socket.removeAllListeners();
+      this.socket.disconnect();
+      this.socket = null;
+    }
+    this.isConnected = false;
+    this.onlineCount = 1;
+    this.onConnectionChange?.(false, 1);
+    this.connect(overrideUrl);
+  }
+
   public connect(serverUrl?: string) {
     if (this.socket && this.socket.connected) return;
 
-    // Default to environment variable (Vercel deployment) or current window origin
-    const envUrl = (import.meta as any).env?.VITE_SOCKET_SERVER_URL;
-    const targetUrl = serverUrl || envUrl || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000');
+    const targetUrl = this.resolveTargetUrl(serverUrl);
+    this.activeServerUrl = targetUrl;
 
     this.socket = io(targetUrl, {
       transports: ['websocket', 'polling'],
