@@ -20,6 +20,7 @@ export interface VehicleStats {
   colorHex: string;
   modelFile: string;
   wheelScale?: number;
+  drivetrain?: 'rwd' | 'fwd' | 'awd';
 }
 
 export type DayNightMode = 'day' | 'sunset' | 'night';
@@ -51,6 +52,8 @@ export interface PlayerControls {
   interact?: boolean;
   /** Jetpack: push down (Ctrl) */
   descend?: boolean;
+  /** Parachute deploy/cut (P) */
+  parachute?: boolean;
   /** Analog thumb movement vector (-1.0 to 1.0) */
   analogX?: number;
   analogY?: number;
@@ -59,7 +62,7 @@ export interface PlayerControls {
 export interface GameTelemetry {
   speedKmh: number;
   rpm: number;
-  gear: 'R' | 'N' | 'D';
+  gear: 'R' | 'N' | 'D' | '1' | '2' | '3' | '4' | '5' | '6' | string;
   isDrifting: boolean;
   driftScore: number;
   carPosition: [number, number, number];
@@ -77,6 +80,7 @@ export interface GameTelemetry {
   gForce: number; // lateral G for the speedo
   jetpackActive: boolean;
   jetpackFuel: number; // 0..100
+  parachuteActive: boolean;
   altitude: number;    // metres above street level
   headlightMode: HeadlightMode;
 }

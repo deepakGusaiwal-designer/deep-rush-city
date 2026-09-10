@@ -12,7 +12,8 @@ export const VEHICLE_LIST: VehicleStats[] = [
     mass: 1200,
     driftFactor: 0.88,
     colorHex: '#38bdf8',
-    modelFile: '/models/vehicles/Car_06.glb'
+    modelFile: '/models/vehicles/Car_06.glb',
+    drivetrain: 'rwd'
   },
   {
     id: 'Car_13',
@@ -25,7 +26,8 @@ export const VEHICLE_LIST: VehicleStats[] = [
     mass: 1100,
     driftFactor: 0.94,
     colorHex: '#ef4444',
-    modelFile: '/models/vehicles/Car_13.glb'
+    modelFile: '/models/vehicles/Car_13.glb',
+    drivetrain: 'rwd'
   },
   {
     id: 'Car_16',
@@ -38,7 +40,8 @@ export const VEHICLE_LIST: VehicleStats[] = [
     mass: 1400,
     driftFactor: 0.75,
     colorHex: '#10b981',
-    modelFile: '/models/vehicles/Car_16.glb'
+    modelFile: '/models/vehicles/Car_16.glb',
+    drivetrain: 'awd'
   },
   {
     id: 'Car_19',
@@ -51,7 +54,8 @@ export const VEHICLE_LIST: VehicleStats[] = [
     mass: 950,
     driftFactor: 0.82,
     colorHex: '#f59e0b',
-    modelFile: '/models/vehicles/Car_19.glb'
+    modelFile: '/models/vehicles/Car_19.glb',
+    drivetrain: 'fwd'
   },
   {
     id: 'Futuristic_Car_1',
@@ -64,7 +68,8 @@ export const VEHICLE_LIST: VehicleStats[] = [
     mass: 1300,
     driftFactor: 0.90,
     colorHex: '#8b5cf6',
-    modelFile: '/models/vehicles/Futuristic_Car_1.glb'
+    modelFile: '/models/vehicles/Futuristic_Car_1.glb',
+    drivetrain: 'awd'
   },
   {
     id: 'Van',
@@ -77,7 +82,8 @@ export const VEHICLE_LIST: VehicleStats[] = [
     mass: 1900,
     driftFactor: 0.60,
     colorHex: '#64748b',
-    modelFile: '/models/vehicles/Van.glb'
+    modelFile: '/models/vehicles/Van.glb',
+    drivetrain: 'rwd'
   },
   {
     id: 'Bus',
@@ -90,7 +96,8 @@ export const VEHICLE_LIST: VehicleStats[] = [
     mass: 4200,
     driftFactor: 0.45,
     colorHex: '#eab308',
-    modelFile: '/models/vehicles/Bus.glb'
+    modelFile: '/models/vehicles/Bus.glb',
+    drivetrain: 'rwd'
   }
 ];
 

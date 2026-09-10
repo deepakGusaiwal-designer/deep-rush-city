@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { VehicleController, DEFAULT_SPAWN_POS } from './VehicleController';
 import { CityEnvironment } from './CityEnvironment';
 
-export const PROTAGONIST_SPAWN_POS = new THREE.Vector3(-22.8, 0.02, 0);
+export const PROTAGONIST_SPAWN_POS = new THREE.Vector3(2.2, 0.02, 5.0);
 import { FollowCamera } from './FollowCamera';
 import { LightingManager } from './LightingManager';
 import { DynamicSky } from './DynamicSky';
@@ -138,6 +138,7 @@ export class CityGameEngine {
   private downKind: 'wasted' | 'busted' | null = null;
   private downTimer: number = 0;
   private blipTimer: number = 0;
+  private telemetryTimer: number = 0;
   private wreckCameraTimer: number = 0;
 
   private clock: THREE.Clock;
@@ -215,15 +216,21 @@ export class CityGameEngine {
 
     this.multiplayerClient.onPlayerJoined = (id, name) => {
       this.remotePlayerManager.handlePlayerJoined(id, name);
+      useGameStore.getState().pushNotification(`🚗 ${name} entered the city!`, 'info');
+      useGameStore.getState().setOnlineCount(this.multiplayerClient.onlineCount);
     };
-    this.multiplayerClient.onPlayerLeft = (id) => {
+    this.multiplayerClient.onPlayerLeft = (id, name) => {
       this.remotePlayerManager.handlePlayerLeft(id);
+      if (name) useGameStore.getState().pushNotification(`${name} left the city.`, 'info');
+      useGameStore.getState().setOnlineCount(this.multiplayerClient.onlineCount);
     };
     this.multiplayerClient.onPlayerUpdate = (state) => {
+      if (state.id === this.multiplayerClient.playerId) return;
       this.remotePlayerManager.handlePlayerUpdate(state);
     };
     this.multiplayerClient.onExistingPlayers = (existing) => {
       this.remotePlayerManager.handleExistingPlayers(existing);
+      useGameStore.getState().setOnlineCount(this.multiplayerClient.onlineCount);
     };
     this.multiplayerClient.onChatMessage = (msg) => {
       this.chatMessages.push(msg);
@@ -232,6 +239,8 @@ export class CityGameEngine {
     };
     this.multiplayerClient.onConnectionChange = (connected, count) => {
       this.onMultiplayerConnectionChanged?.(connected, count);
+      useGameStore.getState().setMultiplayerConnected(connected);
+      useGameStore.getState().setOnlineCount(count);
     };
     this.multiplayerClient.onInspectVehicleData = (data) => {
       this.inspectedCarData = data;
@@ -354,6 +363,23 @@ export class CityGameEngine {
             Math.cos(this.playerController.heading) * 2.5
           )
         );
+      }
+    };
+
+    // Tumble pavement bounces emit directional blood spray & ground pool
+    this.playerController.onTumbleBounce = (bounceSpeed) => {
+      if (this.isDown) return;
+      if (bounceSpeed > 2.8) {
+        const bouncePos = this.playerController.position.clone();
+        this.bloodEffects.emitSplatter(
+          bouncePos,
+          new THREE.Vector3((Math.random() - 0.5) * 0.6, 0.85, (Math.random() - 0.5) * 0.6),
+          Math.min(28, Math.round(10 + bounceSpeed * 2.5)),
+          2.5 + bounceSpeed * 0.35,
+          bouncePos.y
+        );
+        this.bloodEffects.spawnGroundPool(bouncePos, 1.1, bouncePos.y);
+        audioManager.playBloodSplatter(0.35);
       }
     };
 
@@ -502,7 +528,7 @@ export class CityGameEngine {
    * searched on an expanding ring so respawns never land inside a fountain or lobby.
    */
   public findSafeSpot(pos: THREE.Vector3, margin: number = 1.4, maxRadius: number = 30): THREE.Vector3 {
-    const colliders = this.cityEnv.baseColliders;
+    const colliders = this.cityEnv.getCollidersNear(pos, maxRadius + margin + 10);
     const isClear = (x: number, z: number) => {
       for (let i = 0; i < colliders.length; i++) {
         const b = colliders[i];
@@ -835,9 +861,45 @@ export class CityGameEngine {
       interactionPrompt = this.vehicleController.isWrecked ? 'Vehicle wrecked — Press [E] to bail out' : 'Press [E] to exit vehicle';
       if (controls.interact) {
         store.setControl('interact', false);
+        const exitSpeedKmh = Math.abs(this.vehicleController.speedKmh);
+        const isBailout = exitSpeedKmh >= 12.0;
+
         this.playerMode = 'exiting_vehicle';
-        this.vehicleInteraction.startExitVehicle(footColliders);
+        const exitPos = this.vehicleInteraction.startExitVehicle(footColliders, isBailout);
         this.playerMode = 'on_foot';
+
+        if (isBailout) {
+          const heading = this.vehicleController.heading;
+          const fwd = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading));
+          const left = new THREE.Vector3(Math.cos(heading), 0, -Math.sin(heading));
+          const exitSpeedMs = exitSpeedKmh / 3.6;
+
+          // Ejection velocity: forward momentum + lateral ejection push away from door + upward pop
+          const ejectionVel = new THREE.Vector3()
+            .copy(this.vehicleController.velocity)
+            .multiplyScalar(0.72)
+            .addScaledVector(left, 3.2 + Math.min(exitSpeedMs * 0.18, 5.0))
+            .add(new THREE.Vector3(0, 1.8 + Math.min(exitSpeedMs * 0.12, 2.5), 0));
+
+          this.playerController.applyVehicleBailout(ejectionVel, exitSpeedKmh);
+
+          // Calibrated damage based on speed (12 km/h: 8 dmg, 50 km/h: 24 dmg, 100 km/h: 54 dmg, 150 km/h: 84 dmg)
+          const damage = THREE.MathUtils.clamp((exitSpeedKmh - 10) * 0.6, 8, 88);
+          this.damagePlayer(damage);
+
+          // Directional blood spray & ground splatter pool
+          const pPos = this.playerController.position;
+          const sprayDir = left.clone().multiplyScalar(0.7).add(fwd.clone().multiplyScalar(0.3)).normalize();
+          const bloodCount = Math.min(60, Math.round(20 + exitSpeedKmh * 0.35));
+          this.bloodEffects.emitSplatter(pPos, sprayDir, bloodCount, 4.5 + exitSpeedMs * 0.3, pPos.y);
+          const poolRadius = THREE.MathUtils.clamp(0.8 + (exitSpeedKmh / 100) * 1.2, 0.9, 2.4);
+          this.bloodEffects.spawnGroundPool(pPos, poolRadius, pPos.y);
+
+          // Audio & camera trauma
+          audioManager.playBloodSplatter(Math.min(0.65, 0.35 + (exitSpeedKmh / 150) * 0.3));
+          audioManager.playTumbleImpact();
+          this.cameraSystem.addTrauma(Math.min(1.0, 0.35 + exitSpeedKmh / 140));
+        }
       }
     }
 
@@ -858,6 +920,7 @@ export class CityGameEngine {
         if (hijackedId) {
           this.switchVehicle(hijackedId);
         }
+        this.vehicleController.onDriverEnter();
         audioManager.startEngine(hijackedId || this.vehicleController.currentVehicleId);
         this.playerMode = 'driving';
       });
@@ -888,6 +951,8 @@ export class CityGameEngine {
       // Jetpack visuals: pack on the back, nozzle flames, exhaust vapour
       const pc = this.playerController;
       this.playerCharacter.setJetpack(pc.isJetpackOn, pc.thrust01);
+      // Parachute container pack visibility (on back when airborne or deployed)
+      this.playerCharacter.parachutePackMesh.visible = !pc.isJetpackOn && (pc.isParachuteOpen || (!pc.isGrounded && pc.altitude > 1.8));
       if (pc.isJetpackOn && pc.thrust01 > 0.1) {
         const nozzleL = new THREE.Vector3();
         const nozzleR = new THREE.Vector3();
@@ -896,12 +961,39 @@ export class CityGameEngine {
         this.smokeEffects.emitExhaust(nozzleR, pc.thrust01, dt);
       }
       audioManager.updateJetpack(pc.isJetpackOn, pc.thrust01, pc.isAfterburner);
-      this.vehicleController.setBrakeLights(false, isNight);
-      this.vehicleController.updateSuspensionSpring(dt);
+
+      // Unoccupied vehicle coasting physics: rolls forward and decelerates naturally under drag & engine braking
+      const carSpeedKmh = Math.abs(this.vehicleController.speedKmh);
+      if (carSpeedKmh > 0.5 || this.vehicleController.velocity.lengthSq() > 0.04) {
+        const EMPTY_CONTROLS: PlayerControls = {
+          forward: false,
+          backward: false,
+          left: false,
+          right: false,
+          handbrake: false,
+          boost: false,
+          horn: false,
+          interact: false,
+        };
+        this.vehicleController.update(
+          EMPTY_CONTROLS,
+          delta,
+          staticColliders,
+          (impactPos, impactNormal, intensity) => {
+            this.impactEffects.emit(impactPos, impactNormal, Math.round(22 * intensity));
+          }
+        );
+        this.vehicleController.setBrakeLights(false, isNight);
+        this.resolveVehicleDynamics();
+      } else {
+        this.vehicleController.velocity.set(0, 0, 0);
+        this.vehicleController.speedKmh = 0;
+        this.vehicleController.setBrakeLights(false, isNight);
+        this.vehicleController.updateSuspensionSpring(dt);
+      }
+
       this.lightingManager.updateCarPosition(this.playerController.position);
     } else if (this.playerMode === 'driving') {
-      const isBoosting = controls.boost;
-
       this.vehicleController.update(
         controls,
         delta,
@@ -915,7 +1007,8 @@ export class CityGameEngine {
       this.resolveVehicleDynamics();
 
       const isDrifting = this.vehicleController.isDrifting;
-      const isSlipping = isDrifting || this.vehicleController.isWheelspin || (isBraking && Math.abs(this.vehicleController.speedKmh) > 2);
+      const isBoosting = this.vehicleController.isBoosting;
+      const isSlipping = isDrifting || this.vehicleController.isWheelspin || (isBraking && Math.abs(this.vehicleController.speedKmh) > 18);
 
       this.vehicleController.setBrakeLights(isBraking || isDrifting, isNight);
       this.lightingManager.setBrakeLights(isBraking || isDrifting);
@@ -936,7 +1029,10 @@ export class CityGameEngine {
         this.vehicleController.position,
         this.vehicleController.rootGroup.quaternion,
         this.vehicleController.speedKmh,
-        delta
+        delta,
+        this.vehicleController.yawRate,
+        this.vehicleController.isDrifting,
+        this.vehicleController.isBoosting
       );
 
       this.lightingManager.updateCarPosition(this.vehicleController.position);
@@ -1037,41 +1133,52 @@ export class CityGameEngine {
       });
     }
 
-    // 7. Update UI Telemetry Store
-    const speed = this.playerMode === 'driving'
-      ? this.vehicleController.speedKmh
-      : Math.round(this.playerController.speed * 3.6);
-    const absSpeed = Math.abs(speed);
-    const rpm = this.playerMode === 'driving'
-      ? (this.vehicleController.isWrecked ? 0 : Math.round(900 + ((absSpeed % 28) / 28) * 5800 + (controls.forward ? 400 : 0)))
-      : 0;
+    // 7. Update UI Telemetry Store (Throttled to ~25Hz for high performance while keeping critical events instant)
+    this.telemetryTimer += dt;
+    const activePrompt = this.isDown ? null : interactionPrompt;
+    const modeChanged = this.playerMode !== store.telemetry.playerMode;
+    const promptChanged = activePrompt !== store.telemetry.interactionPrompt;
+    const healthChanged = this.health !== store.telemetry.health;
+    const wantedChanged = this.wanted.level !== store.telemetry.wantedLevel;
 
-    store.updateTelemetry({
-      speedKmh: speed,
-      rpm,
-      gear: this.playerMode === 'driving' ? (speed > 1 ? 'D' : speed < -1 ? 'R' : 'N') : 'N',
-      isDrifting: this.playerMode === 'driving' ? this.vehicleController.isDrifting : false,
-      driftScore: this.vehicleController.driftScore,
-      carPosition: [activeFocusPos.x, activeFocusPos.y, activeFocusPos.z],
-      carHeadingRad: this.playerMode === 'driving' ? this.vehicleController.heading : this.playerController.heading,
-      activePOI: activePOI,
-      trafficLight: this.trafficManager.trafficLightColor,
-      lightTimer: Math.ceil(this.trafficManager.lightTimer),
-      playerMode: this.playerMode,
-      interactionPrompt: this.isDown ? null : interactionPrompt,
-      health: this.health,
-      armor: this.armor,
-      vehicleHealth: this.vehicleController.health,
-      wantedLevel: this.wanted.level,
-      wantedHeat: this.wanted.heat,
-      gForce: this.playerMode === 'driving' ? this.vehicleController.lateralAccel / 9.81 : 0,
-      jetpackActive: this.playerController.isJetpackOn,
-      jetpackFuel: this.playerController.fuel,
-      altitude: this.playerController.altitude,
-      headlightMode: this.lastHeadlightMode || store.headlightMode || 'low',
-    });
-    if (store.vehicleHealth !== this.vehicleController.health) {
-      store.setVehicleHealth(this.vehicleController.health);
+    if (this.telemetryTimer >= 0.04 || modeChanged || promptChanged || healthChanged || wantedChanged) {
+      this.telemetryTimer = 0;
+      const speed = this.playerMode === 'driving'
+        ? this.vehicleController.speedKmh
+        : Math.round(this.playerController.speed * 3.6);
+      const absSpeed = Math.abs(speed);
+      const rpm = this.playerMode === 'driving'
+        ? (this.vehicleController.isWrecked ? 0 : this.vehicleController.currentRpm)
+        : 0;
+
+      store.updateTelemetry({
+        speedKmh: speed,
+        rpm,
+        gear: this.playerMode === 'driving' ? this.vehicleController.currentGearLabel : 'N',
+        isDrifting: this.playerMode === 'driving' ? this.vehicleController.isDrifting : false,
+        driftScore: this.vehicleController.driftScore,
+        carPosition: [activeFocusPos.x, activeFocusPos.y, activeFocusPos.z],
+        carHeadingRad: this.playerMode === 'driving' ? this.vehicleController.heading : this.playerController.heading,
+        activePOI: activePOI,
+        trafficLight: this.trafficManager.trafficLightColor,
+        lightTimer: Math.ceil(this.trafficManager.lightTimer),
+        playerMode: this.playerMode,
+        interactionPrompt: activePrompt,
+        health: this.health,
+        armor: this.armor,
+        vehicleHealth: this.vehicleController.health,
+        wantedLevel: this.wanted.level,
+        wantedHeat: this.wanted.heat,
+        gForce: this.playerMode === 'driving' ? this.vehicleController.lateralAccel / 9.81 : 0,
+        jetpackActive: this.playerController.isJetpackOn,
+        jetpackFuel: this.playerController.fuel,
+        parachuteActive: this.playerController.isParachuteOpen,
+        altitude: this.playerController.altitude,
+        headlightMode: this.lastHeadlightMode || store.headlightMode || 'low',
+      });
+      if (store.vehicleHealth !== this.vehicleController.health) {
+        store.setVehicleHealth(this.vehicleController.health);
+      }
     }
 
     // 8. Render WebGL Scene
@@ -1157,6 +1264,24 @@ export class CityGameEngine {
       audioManager.updateJetpack(false, 0, false);
     }
     return on;
+  }
+
+  /** Deploy / cut the parachute (on foot only). */
+  public toggleParachute(): boolean {
+    if (this.isDown) return false;
+    const store = useGameStore.getState();
+    if (this.playerMode === 'driving' || this.playerMode === 'entering_vehicle') {
+      return false;
+    }
+    if (this.playerMode !== 'on_foot') return false;
+
+    const isOpen = this.playerController.toggleParachute();
+    if (isOpen) {
+      store.pushNotification('🪂 Parachute deployed! [A/D] Steer · [S/SPACE] Flare Brake · [W] Dive Glide · [P] Cut Lines', 'info');
+    } else {
+      store.pushNotification('Parachute cut / stowed.', 'info');
+    }
+    return isOpen;
   }
 
   public toggleCabJob() {

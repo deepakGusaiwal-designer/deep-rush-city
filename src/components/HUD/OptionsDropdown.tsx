@@ -33,6 +33,8 @@ import {
   Wifi,
   WifiOff,
   RefreshCw,
+  Compass,
+  Wind,
 } from 'lucide-react';
 
 interface OptionsDropdownProps {
@@ -43,6 +45,7 @@ interface OptionsDropdownProps {
   onRepairVehicle?: () => void;
   onClearWanted?: () => void;
   onToggleJetpack?: () => void;
+  onToggleParachute?: () => void;
   onToggleCabJob?: () => void;
   onToggleMissions?: () => void;
   onToggleCustoms?: () => void;
@@ -64,6 +67,7 @@ export const OptionsDropdown: React.FC<OptionsDropdownProps> = ({
   onRepairVehicle,
   onClearWanted,
   onToggleJetpack,
+  onToggleParachute,
   onToggleCabJob,
   onToggleMissions,
   onToggleCustoms,
@@ -106,6 +110,7 @@ export const OptionsDropdown: React.FC<OptionsDropdownProps> = ({
   const wantedLevel = useGameStore((state) => state.wantedLevel);
   const vehicleHealth = useGameStore((state) => state.vehicleHealth);
   const jetpackActive = useGameStore((state) => state.telemetry.jetpackActive);
+  const parachuteActive = useGameStore((state) => state.telemetry.parachuteActive);
   const cabMission = useGameStore((state) => state.cabMission);
   const headlightMode = useGameStore((state) => state.headlightMode);
   const setHeadlightMode = useGameStore((state) => state.setHeadlightMode);
@@ -672,6 +677,26 @@ export const OptionsDropdown: React.FC<OptionsDropdownProps> = ({
                       <div className="text-[11px] font-bold truncate">Jetpack Flight</div>
                       <div className="text-[9px] text-gray-400">
                         {jetpackActive ? 'Equipped' : 'Stowed'}
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* Toggle Parachute */}
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => onToggleParachute?.()}
+                    className={`p-2 rounded-xl border text-left transition-all flex items-center gap-2 group ${
+                      parachuteActive
+                        ? 'bg-rose-500/20 border-rose-400 text-rose-200'
+                        : 'bg-white/5 hover:bg-emerald-500/20 border-white/5 hover:border-emerald-400/40 text-white'
+                    }`}
+                  >
+                    <Wind className="w-4 h-4 text-emerald-400 shrink-0 group-hover:scale-110 transition-transform" />
+                    <div className="min-w-0">
+                      <div className="text-[11px] font-bold truncate">Parachute Canopy</div>
+                      <div className="text-[9px] text-gray-400">
+                        {parachuteActive ? 'Gliding (P)' : 'Airborne Deploy (P)'}
                       </div>
                     </div>
                   </button>

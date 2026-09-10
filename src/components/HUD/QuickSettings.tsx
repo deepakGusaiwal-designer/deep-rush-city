@@ -14,6 +14,7 @@ interface QuickSettingsProps {
   onRepairVehicle?: () => void;
   onClearWanted?: () => void;
   onToggleJetpack?: () => void;
+  onToggleParachute?: () => void;
   onToggleCabJob?: () => void;
   onToggleMissions?: () => void;
   onToggleCustoms?: () => void;
@@ -35,6 +36,7 @@ export const QuickSettings: React.FC<QuickSettingsProps> = ({
   onRepairVehicle,
   onClearWanted,
   onToggleJetpack,
+  onToggleParachute,
   onToggleCabJob,
   onToggleMissions,
   onToggleCustoms,
@@ -117,6 +119,7 @@ export const QuickSettings: React.FC<QuickSettingsProps> = ({
         onRepairVehicle={onRepairVehicle}
         onClearWanted={onClearWanted}
         onToggleJetpack={onToggleJetpack}
+        onToggleParachute={onToggleParachute}
         onToggleCabJob={onToggleCabJob}
         onToggleMissions={onToggleMissions}
         onToggleCustoms={onToggleCustoms}

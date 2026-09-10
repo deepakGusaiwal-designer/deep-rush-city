@@ -8,19 +8,20 @@ interface CabMissionHUDProps {
 
 export const CabMissionHUD: React.FC<CabMissionHUDProps> = ({ onCancelJob }) => {
   const mission = useGameStore((state) => state.cabMission);
-  const telemetry = useGameStore((state) => state.telemetry);
+  const carPosition = useGameStore((state) => state.telemetry.carPosition);
+  const carHeadingRad = useGameStore((state) => state.telemetry.carHeadingRad);
 
   if (mission.status === 'idle') return null;
 
   // Calculate direction angle to target for waypoint arrow
   const isPickup = mission.status === 'pickup' || mission.status === 'passenger_entering';
   const targetPos = isPickup ? mission.pickupPos : mission.dropoffPos;
-  const carX = telemetry.carPosition[0];
-  const carZ = telemetry.carPosition[2];
+  const carX = carPosition[0];
+  const carZ = carPosition[2];
   const dx = targetPos[0] - carX;
   const dz = targetPos[2] - carZ;
   const angleToTarget = Math.atan2(dx, dz);
-  const relativeAngleRad = angleToTarget - telemetry.carHeadingRad;
+  const relativeAngleRad = angleToTarget - carHeadingRad;
   const arrowRotationDeg = (relativeAngleRad * 180) / Math.PI;
 
   return (

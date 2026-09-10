@@ -258,6 +258,10 @@ export const App: React.FC = () => {
     engineRef.current?.toggleJetpack();
   };
 
+  const handleToggleParachute = () => {
+    engineRef.current?.toggleParachute();
+  };
+
   const handleSelectVehicle = (vehicleId: VehicleModelId) => {
     engineRef.current?.switchVehicle(vehicleId);
   };
@@ -352,24 +356,24 @@ export const App: React.FC = () => {
           {/* Top Bar */}
           <div className="flex items-start justify-between w-full gap-2">
             {/* Left: Brand Badge, Health Bar, Cash Counter, Active Vehicle Dropdown & notifications */}
-            <div className="flex flex-col gap-1.5 pointer-events-auto">
-              {/* Brand Logo in Top-Left Corner (Small, sleek size) */}
-              <div className="flex items-center px-2.5 py-1 rounded-xl bg-slate-950/40 backdrop-blur-md border border-white/10 shadow-lg shadow-black/30 hover:border-cyan-400/40 transition-all duration-300 w-fit group select-none cursor-default">
-                <img
-                  src="/logo.png"
-                  alt="Deep Rush City"
-                  className="h-5 sm:h-6 w-auto object-contain drop-shadow-[0_0_10px_rgba(255,180,0,0.35)] transition-all duration-300 group-hover:brightness-110"
-                />
-              </div>
+            <div className="flex flex-col gap-1 sm:gap-1.5 pointer-events-auto">
+              <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap max-w-[340px] sm:max-w-none">
+                {/* Brand Logo in Top-Left Corner (Small, sleek size) */}
+                <div className="flex items-center px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-xl bg-slate-950/40 backdrop-blur-md border border-white/10 shadow-lg shadow-black/30 hover:border-cyan-400/40 transition-all duration-300 w-fit group select-none cursor-default shrink-0">
+                  <img
+                    src="/logo.png"
+                    alt="Deep Rush City"
+                    className="h-4 sm:h-6 w-auto object-contain drop-shadow-[0_0_10px_rgba(255,180,0,0.35)] transition-all duration-300 group-hover:brightness-110"
+                  />
+                </div>
 
-              <div className="flex items-center gap-1.5 sm:gap-2">
                 <GTAHealthBar />
                 <CashDisplay />
-              </div>
 
-              {/* Interactive Vehicle Selection Dropdown */}
-              <div className="flex items-center gap-1.5">
-                <VehicleDropdown onSelectVehicle={handleSelectVehicle} />
+                {/* Interactive Vehicle Selection Dropdown */}
+                <div className="flex items-center">
+                  <VehicleDropdown onSelectVehicle={handleSelectVehicle} />
+                </div>
               </div>
 
               <NotificationFeed />
@@ -383,6 +387,7 @@ export const App: React.FC = () => {
                 onToggleMissions={handleToggleMissions}
                 onToggleCustoms={handleToggleCustoms}
                 onToggleJetpack={handleToggleJetpack}
+                onToggleParachute={handleToggleParachute}
               />
 
               {/* Active Cab Mission Banner */}
@@ -403,6 +408,7 @@ export const App: React.FC = () => {
                 onRepairVehicle={handleRepairVehicle}
                 onClearWanted={handleClearWanted}
                 onToggleJetpack={handleToggleJetpack}
+                onToggleParachute={handleToggleParachute}
                 onToggleCabJob={handleToggleCabJob}
                 onToggleMissions={handleToggleMissions}
                 onToggleCustoms={handleToggleCustoms}
@@ -422,25 +428,27 @@ export const App: React.FC = () => {
           <POIPopup />
 
           {/* Bottom Bar: MiniMap, Controls Legend, Speedometer */}
-          <div className="flex items-end justify-between w-full gap-2 sm:gap-4">
-            {/* Bottom-Left: MiniMap (Displayed cleanly above the thumbstick controller on mobile) */}
-            <div className="fixed bottom-[136px] left-3 sm:bottom-[150px] sm:left-4 lg:static z-10 pointer-events-auto">
+          <div className="flex items-end justify-between w-full gap-2 sm:gap-4 pointer-events-none">
+            {/* Bottom-Left: MiniMap (Desktop: static; Mobile: fixed at bottom-2.5 left-[134px] alongside steering pad) */}
+            <div className="fixed bottom-2.5 left-[134px] sm:left-[144px] lg:static z-10 pointer-events-auto">
               <MiniMap />
             </div>
 
             {/* Bottom-Center: Controls Overlay (Desktop keyboard legend / full-screen mobile touch overlay) */}
-            <div className="flex-1 flex justify-center">
+            <div className="flex-1 flex justify-center pointer-events-none">
               <ControlsOverlay
                 onResetCar={handleResetCar}
                 onToggleCabJob={handleToggleCabJob}
                 onToggleCustoms={handleToggleCustoms}
                 onToggleMissions={handleToggleMissions}
                 onToggleJetpack={handleToggleJetpack}
+                onToggleParachute={handleToggleParachute}
               />
             </div>
 
-            {/* Bottom-Right: Speedometer (driving) / Jetpack gauges (flying) (Floats above right thumb pedals on mobile) */}
-            <div className="fixed bottom-24 sm:bottom-28 right-2.5 sm:right-3 lg:static z-10 pointer-events-auto flex flex-col items-end gap-1.5 sm:gap-2">
+            {/* Bottom-Right: Speedometer (driving) / Jetpack gauges (flying) */}
+            {/* Mobile: fixed along bottom bezel at right-[132px] alongside pedals; pointer-events-none allows touches to pass through! */}
+            <div className="fixed bottom-2.5 right-[132px] sm:right-[144px] lg:static z-10 pointer-events-none flex flex-col items-end gap-1.5 sm:gap-2">
               <Speedometer />
               <JetpackHUD />
             </div>
