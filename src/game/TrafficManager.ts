@@ -178,31 +178,38 @@ export class TrafficManager {
     let roadCoord = 0;
     let laneCoord = 0;
 
+    const pChunkX = Math.round(playerPos.x / CHUNK_WIDTH);
+    const pChunkZ = Math.round(playerPos.z / CHUNK_DEPTH);
+    const cx = pChunkX + (Math.floor(Math.random() * 3) - 1);
+    const cz = pChunkZ + (Math.floor(Math.random() * 3) - 1);
+
     if (axis === 'Z') {
       const baseAvenue = BASE_AVENUES_X[Math.floor(Math.random() * BASE_AVENUES_X.length)];
-      roadCoord = baseAvenue;
+      roadCoord = cx * CHUNK_WIDTH + baseAvenue;
       laneCoord = roadCoord + (dir === 1 ? LANE_OFFSET : -LANE_OFFSET);
       posX = laneCoord;
 
-      const minZ = Math.min(...BASE_STREETS_Z);
-      const maxZ = Math.max(...BASE_STREETS_Z);
+      const minZ = cz * CHUNK_DEPTH + Math.min(...BASE_STREETS_Z);
+      const maxZ = cz * CHUNK_DEPTH + Math.max(...BASE_STREETS_Z);
       let posZClamped = minZ + 8.0 + Math.random() * (maxZ - minZ - 16.0);
-      // Avoid spawning directly on top of player start position on the road lane (-26.5, 0)
-      const playerStartX = -26.5;
-      if (Math.abs(posX - playerStartX) < 4.0 && Math.abs(posZClamped) < 24.0) {
-        posZClamped = posZClamped > 0 ? posZClamped + 24.0 : posZClamped - 24.0;
+      if (Math.abs(posX - playerPos.x) < 4.0 && Math.abs(posZClamped - playerPos.z) < 24.0) {
+        posZClamped = posZClamped > playerPos.z ? posZClamped + 24.0 : posZClamped - 24.0;
       }
       posZ = posZClamped;
       heading = dir === 1 ? 0 : Math.PI;
     } else {
       const baseStreet = BASE_STREETS_Z[Math.floor(Math.random() * BASE_STREETS_Z.length)];
-      roadCoord = baseStreet;
+      roadCoord = cz * CHUNK_DEPTH + baseStreet;
       laneCoord = roadCoord + (dir === 1 ? -LANE_OFFSET : LANE_OFFSET);
       posZ = laneCoord;
 
-      const minX = Math.min(...BASE_AVENUES_X);
-      const maxX = Math.max(...BASE_AVENUES_X);
-      posX = minX + 8.0 + Math.random() * (maxX - minX - 16.0);
+      const minX = cx * CHUNK_WIDTH + Math.min(...BASE_AVENUES_X);
+      const maxX = cx * CHUNK_WIDTH + Math.max(...BASE_AVENUES_X);
+      let posXClamped = minX + 8.0 + Math.random() * (maxX - minX - 16.0);
+      if (Math.abs(posZ - playerPos.z) < 4.0 && Math.abs(posXClamped - playerPos.x) < 24.0) {
+        posXClamped = posXClamped > playerPos.x ? posXClamped + 24.0 : posXClamped - 24.0;
+      }
+      posX = posXClamped;
       heading = dir === 1 ? Math.PI / 2 : -Math.PI / 2;
     }
 
@@ -317,8 +324,8 @@ export class TrafficManager {
     this.trafficCars.push(trafficCar);
   }
 
-  // Smoothly reposition only if violently knocked off-map into ocean
-  private repositionCarOnRoad(car: TrafficCar) {
+  // Smoothly reposition car onto a road lane near the player
+  private repositionCarOnRoad(car: TrafficCar, nearPos?: THREE.Vector3) {
     const axis: 'X' | 'Z' = Math.random() > 0.5 ? 'Z' : 'X';
     const dir: 1 | -1 = Math.random() > 0.5 ? 1 : -1;
     car.axis = axis;
@@ -331,18 +338,27 @@ export class TrafficManager {
     car.turnCooldown = 2.5;
     car.speed = 7.5 + Math.random() * 3.5;
 
+    const refX = nearPos ? nearPos.x : 0;
+    const refZ = nearPos ? nearPos.z : 0;
+    const pChunkX = Math.round(refX / CHUNK_WIDTH);
+    const pChunkZ = Math.round(refZ / CHUNK_DEPTH);
+    const cx = pChunkX + (Math.floor(Math.random() * 3) - 1);
+    const cz = pChunkZ + (Math.floor(Math.random() * 3) - 1);
+
     if (axis === 'Z') {
-      car.roadCoord = BASE_AVENUES_X[Math.floor(Math.random() * BASE_AVENUES_X.length)];
+      const baseAvenue = BASE_AVENUES_X[Math.floor(Math.random() * BASE_AVENUES_X.length)];
+      car.roadCoord = cx * CHUNK_WIDTH + baseAvenue;
       car.laneCoord = car.roadCoord + (dir === 1 ? LANE_OFFSET : -LANE_OFFSET);
-      const minZ = Math.min(...BASE_STREETS_Z);
-      const maxZ = Math.max(...BASE_STREETS_Z);
+      const minZ = cz * CHUNK_DEPTH + Math.min(...BASE_STREETS_Z);
+      const maxZ = cz * CHUNK_DEPTH + Math.max(...BASE_STREETS_Z);
       car.position.set(car.laneCoord, 0.0, minZ + 12.0 + Math.random() * (maxZ - minZ - 24.0));
       car.heading = dir === 1 ? 0 : Math.PI;
     } else {
-      car.roadCoord = BASE_STREETS_Z[Math.floor(Math.random() * BASE_STREETS_Z.length)];
+      const baseStreet = BASE_STREETS_Z[Math.floor(Math.random() * BASE_STREETS_Z.length)];
+      car.roadCoord = cz * CHUNK_DEPTH + baseStreet;
       car.laneCoord = car.roadCoord + (dir === 1 ? -LANE_OFFSET : LANE_OFFSET);
-      const minX = Math.min(...BASE_AVENUES_X);
-      const maxX = Math.max(...BASE_AVENUES_X);
+      const minX = cx * CHUNK_WIDTH + Math.min(...BASE_AVENUES_X);
+      const maxX = cx * CHUNK_WIDTH + Math.max(...BASE_AVENUES_X);
       car.position.set(minX + 12.0 + Math.random() * (maxX - minX - 24.0), 0.0, car.laneCoord);
       car.heading = dir === 1 ? Math.PI / 2 : -Math.PI / 2;
     }
@@ -350,64 +366,7 @@ export class TrafficManager {
 
   // Calculate realistic turn options at intersection and start smooth Bezier cornering
   private triggerIntersectionDecision(car: TrafficCar, avenueX: number, streetZ: number) {
-    const minX = Math.min(...BASE_AVENUES_X);
-    const maxX = Math.max(...BASE_AVENUES_X);
-    const minZ = Math.min(...BASE_STREETS_Z);
-    const maxZ = Math.max(...BASE_STREETS_Z);
-
-    const options: ('straight' | 'right' | 'left')[] = [];
-
-    if (car.axis === 'Z') {
-      // 1. Straight option (if not at city border)
-      if (car.dir === 1 && streetZ < maxZ - 1.0) {
-        options.push('straight', 'straight');
-      } else if (car.dir === -1 && streetZ > minZ + 1.0) {
-        options.push('straight', 'straight');
-      }
-
-      // 2. Right option
-      if (car.dir === 1 && avenueX < maxX - 1.0) {
-        options.push('right');
-      } else if (car.dir === -1 && avenueX > minX + 1.0) {
-        options.push('right');
-      }
-
-      // 3. Left option
-      if (car.dir === 1 && avenueX > minX + 1.0) {
-        options.push('left');
-      } else if (car.dir === -1 && avenueX < maxX - 1.0) {
-        options.push('left');
-      }
-    } else {
-      // 1. Straight option
-      if (car.dir === 1 && avenueX < maxX - 1.0) {
-        options.push('straight', 'straight');
-      } else if (car.dir === -1 && avenueX > minX + 1.0) {
-        options.push('straight', 'straight');
-      }
-
-      // 2. Right option
-      if (car.dir === 1 && streetZ > minZ + 1.0) {
-        options.push('right');
-      } else if (car.dir === -1 && streetZ < maxZ - 1.0) {
-        options.push('right');
-      }
-
-      // 3. Left option
-      if (car.dir === 1 && streetZ < maxZ - 1.0) {
-        options.push('left');
-      } else if (car.dir === -1 && streetZ > minZ + 1.0) {
-        options.push('left');
-      }
-    }
-
-    if (options.length === 0) {
-      // At dead end, flip direction
-      car.dir = (car.dir === 1 ? -1 : 1);
-      car.turnCooldown = 3.0;
-      return;
-    }
-
+    const options: ('straight' | 'right' | 'left')[] = ['straight', 'straight', 'right', 'left'];
     const action = options[Math.floor(Math.random() * options.length)];
 
     if (action === 'straight') {
@@ -637,20 +596,30 @@ export class TrafficManager {
 
         if (isRedForMe) {
           if (car.axis === 'Z') {
-            for (const streetZ of BASE_STREETS_Z) {
-              const distAhead = (streetZ - car.position.z) * car.dir;
-              if (distAhead > 3.0 && distAhead < 15.0) {
-                shouldStop = true;
-                break;
+            const chunkZ = Math.round(car.position.z / CHUNK_DEPTH);
+            for (const cz of [chunkZ, chunkZ + car.dir]) {
+              for (const baseZ of BASE_STREETS_Z) {
+                const streetZ = cz * CHUNK_DEPTH + baseZ;
+                const distAhead = (streetZ - car.position.z) * car.dir;
+                if (distAhead > 3.0 && distAhead < 15.0) {
+                  shouldStop = true;
+                  break;
+                }
               }
+              if (shouldStop) break;
             }
           } else {
-            for (const avenueX of BASE_AVENUES_X) {
-              const distAhead = (avenueX - car.position.x) * car.dir;
-              if (distAhead > 3.0 && distAhead < 15.0) {
-                shouldStop = true;
-                break;
+            const chunkX = Math.round(car.position.x / CHUNK_WIDTH);
+            for (const cx of [chunkX, chunkX + car.dir]) {
+              for (const baseAv of BASE_AVENUES_X) {
+                const avenueX = cx * CHUNK_WIDTH + baseAv;
+                const distAhead = (avenueX - car.position.x) * car.dir;
+                if (distAhead > 3.0 && distAhead < 15.0) {
+                  shouldStop = true;
+                  break;
+                }
               }
+              if (shouldStop) break;
             }
           }
         }
@@ -775,20 +744,34 @@ export class TrafficManager {
         car.turnCooldown = Math.max(0, car.turnCooldown - dt);
         if (car.turnCooldown <= 0 && !car.isStoppedAtLight) {
           if (car.axis === 'Z') {
-            for (const streetZ of BASE_STREETS_Z) {
-              const distAhead = (streetZ - car.position.z) * car.dir;
-              if (distAhead > 0 && distAhead <= 5.0) {
-                this.triggerIntersectionDecision(car, car.roadCoord, streetZ);
-                break;
+            const chunkZ = Math.round(car.position.z / CHUNK_DEPTH);
+            let decided = false;
+            for (const cz of [chunkZ, chunkZ + car.dir]) {
+              for (const baseZ of BASE_STREETS_Z) {
+                const streetZ = cz * CHUNK_DEPTH + baseZ;
+                const distAhead = (streetZ - car.position.z) * car.dir;
+                if (distAhead > 0 && distAhead <= 5.0) {
+                  this.triggerIntersectionDecision(car, car.roadCoord, streetZ);
+                  decided = true;
+                  break;
+                }
               }
+              if (decided) break;
             }
           } else {
-            for (const avenueX of BASE_AVENUES_X) {
-              const distAhead = (avenueX - car.position.x) * car.dir;
-              if (distAhead > 0 && distAhead <= 5.0) {
-                this.triggerIntersectionDecision(car, avenueX, car.roadCoord);
-                break;
+            const chunkX = Math.round(car.position.x / CHUNK_WIDTH);
+            let decided = false;
+            for (const cx of [chunkX, chunkX + car.dir]) {
+              for (const baseAv of BASE_AVENUES_X) {
+                const avenueX = cx * CHUNK_WIDTH + baseAv;
+                const distAhead = (avenueX - car.position.x) * car.dir;
+                if (distAhead > 0 && distAhead <= 5.0) {
+                  this.triggerIntersectionDecision(car, avenueX, car.roadCoord);
+                  decided = true;
+                  break;
+                }
               }
+              if (decided) break;
             }
           }
         }
@@ -837,11 +820,11 @@ export class TrafficManager {
       car.box.max.set(car.position.x + halfX, 1.6, car.position.z + halfZ);
       this.trafficBoxes.push(car.box);
 
-      // Only reposition if knocked far out of city into ocean by player impact
-      const maxBoundX = 72.0 * CITY_SCALE;
-      const maxBoundZ = 92.0 * CITY_SCALE;
-      if (car.isHit && (Math.abs(car.position.x) > maxBoundX || Math.abs(car.position.z) > maxBoundZ)) {
-        this.repositionCarOnRoad(car);
+      // In an infinite city: recycle cars that drive beyond the active bubble (> 240m from player)
+      // or that were knocked away by collisions
+      const distFromPlayer = car.position.distanceTo(playerPos);
+      if (distFromPlayer > 240.0 || (car.isHit && car.hitTimer <= 0 && distFromPlayer > 100.0)) {
+        this.repositionCarOnRoad(car, playerPos);
       }
     }
 

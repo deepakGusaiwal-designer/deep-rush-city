@@ -8,6 +8,7 @@ import {
   Rocket,
   Check,
   Zap,
+  Wind,
 } from 'lucide-react';
 
 interface ActivitiesDropdownProps {
@@ -15,6 +16,7 @@ interface ActivitiesDropdownProps {
   onToggleMissions?: () => void;
   onToggleCustoms?: () => void;
   onToggleJetpack?: () => void;
+  onToggleParachute?: () => void;
 }
 
 export const ActivitiesDropdown: React.FC<ActivitiesDropdownProps> = ({
@@ -22,6 +24,7 @@ export const ActivitiesDropdown: React.FC<ActivitiesDropdownProps> = ({
   onToggleMissions,
   onToggleCustoms,
   onToggleJetpack,
+  onToggleParachute,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
@@ -31,6 +34,7 @@ export const ActivitiesDropdown: React.FC<ActivitiesDropdownProps> = ({
   const isMissionMenuOpen = useGameStore((state) => state.isMissionMenuOpen);
   const isCustomsOpen = useGameStore((state) => state.isCustomsOpen);
   const jetpackActive = useGameStore((state) => state.telemetry.jetpackActive);
+  const parachuteActive = useGameStore((state) => state.telemetry.parachuteActive);
   const playerMode = useGameStore((state) => state.telemetry.playerMode);
 
   const isCabActive = cabMission.status !== 'idle';
@@ -276,6 +280,49 @@ export const ActivitiesDropdown: React.FC<ActivitiesDropdownProps> = ({
                     }`}
                   >
                     {jetpackActive ? 'STOW' : 'FLY'}
+                  </span>
+                </div>
+              </button>
+            )}
+
+            {/* 5. Parachute Canopy */}
+            {playerMode !== 'driving' && (
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => {
+                  onToggleParachute?.();
+                  setIsOpen(false);
+                }}
+                className={`w-full p-2.5 rounded-xl border text-left transition-all flex items-center justify-between group ${
+                  parachuteActive
+                    ? 'bg-rose-500/20 border-rose-400 text-rose-200 shadow-sm'
+                    : 'bg-white/5 border-white/5 hover:bg-emerald-500/10 hover:border-emerald-400/40 text-gray-300 hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-300 shrink-0 group-hover:scale-110 transition-transform">
+                    <Wind className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold text-xs text-white">Parachute Canopy</span>
+                      <span className="hidden lg:inline text-[9px] font-mono px-1 py-0.2 rounded bg-white/10 text-gray-400">P</span>
+                    </div>
+                    <div className="text-[10px] text-gray-400 truncate">
+                      {parachuteActive ? 'Canopy deployed · Gliding' : 'Deploy ram-air canopy in mid-air'}
+                    </div>
+                  </div>
+                </div>
+                <div className="shrink-0 ml-2">
+                  <span
+                    className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${
+                      parachuteActive
+                        ? 'bg-rose-400 text-slate-950 border-rose-300 font-black'
+                        : 'bg-white/5 text-gray-400 border-white/10'
+                    }`}
+                  >
+                    {parachuteActive ? 'CUT' : 'DEPLOY'}
                   </span>
                 </div>
               </button>

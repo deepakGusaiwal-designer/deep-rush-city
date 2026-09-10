@@ -192,6 +192,12 @@ interface GameState {
   setControl: (key: keyof PlayerControls, active: boolean) => void;
   setAnalogInput: (x: number, y: number) => void;
   resetControls: () => void;
+
+  // Multiplayer Online Presence
+  onlineCount: number;
+  setOnlineCount: (count: number) => void;
+  isMultiplayerConnected: boolean;
+  setMultiplayerConnected: (connected: boolean) => void;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -433,6 +439,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     gForce: 0,
     jetpackActive: false,
     jetpackFuel: 100,
+    parachuteActive: false,
     altitude: 0,
     headlightMode: 'low',
   },
@@ -450,6 +457,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     boost: false,
     interact: false,
     descend: false,
+    parachute: false,
     analogX: 0,
     analogY: 0,
   },
@@ -477,5 +485,11 @@ export const useGameStore = create<GameState>((set, get) => ({
       analogX: 0,
       analogY: 0,
     }
-  })
+  }),
+
+  // Multiplayer Online Presence
+  onlineCount: 1,
+  setOnlineCount: (count) => set({ onlineCount: Math.max(1, count) }),
+  isMultiplayerConnected: false,
+  setMultiplayerConnected: (connected) => set({ isMultiplayerConnected: connected }),
 }));

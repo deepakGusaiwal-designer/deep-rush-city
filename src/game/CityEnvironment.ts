@@ -10,10 +10,42 @@ export const CITY_SCALE = 2.5;
 export const CHUNK_WIDTH = 120.0 * CITY_SCALE;
 export const CHUNK_DEPTH = 150.0 * CITY_SCALE;
 
+export interface TrafficSignalLamp {
+  type: 'traffic' | 'pedestrian';
+  color: 'red' | 'yellow' | 'green';
+  mat: THREE.MeshStandardMaterial;
+  glowMat: THREE.MeshBasicMaterial;
+  glowMesh: THREE.Mesh;
+}
+
+export interface TrafficSignalPole {
+  name: string;
+  node: THREE.Object3D;
+  servesZ: boolean;
+  worldPos: THREE.Vector3;
+  overheadPos?: THREE.Vector3;
+  lamps: TrafficSignalLamp[];
+}
+
+export interface CityChunk {
+  gridX: number;
+  gridZ: number;
+  group: THREE.Group;
+  colliders: THREE.Box3[];
+  walkableMeshes: THREE.Mesh[];
+}
+
 export class CityEnvironment {
   public scene: THREE.Scene;
   public cityRootGroup: THREE.Group;
   private lightingManager: LightingManager;
+
+  // 3x3 Dynamic Infinite Chunk Pool
+  public chunks: CityChunk[] = [];
+  public centerChunkX: number = 0;
+  public centerChunkZ: number = 0;
+  private templateChunk: THREE.Group | null = null;
+  private chunkLocalColliders: THREE.Box3[] = [];
 
   // Static colliders extracted from Cartoon_City_Free.glb + boundary perimeter
   public baseColliders: THREE.Box3[] = [];
@@ -22,10 +54,60 @@ export class CityEnvironment {
   // Walkable meshes for raycast elevation & standing (buildings, roofs, roads, props)
   public walkableMeshes: THREE.Mesh[] = [];
 
+  public static isWalkableMesh(nodeName: string): boolean {
+    const n = (nodeName || '').toLowerCase();
+
+    // 1. Strict exclusions: non-walkable props, poles, overhead arms, lights, foliage, signs, wires, vehicles
+    if (
+      n.includes('line') ||
+      n.includes('cable') ||
+      n.includes('wire') ||
+      n.includes('traffic') ||
+      n.includes('spotlight') ||
+      n.includes('light') ||
+      n.includes('lamp') ||
+      n.includes('bush') ||
+      n.includes('palm') ||
+      n.includes('tree') ||
+      n.includes('plant') ||
+      n.includes('flower') ||
+      n.includes('foliage') ||
+      n.includes('trash') ||
+      n.includes('bin') ||
+      n.includes('billboard') ||
+      n.includes('sign') ||
+      n.includes('hydrant') ||
+      n.includes('bench') ||
+      n.includes('car') ||
+      n.includes('van') ||
+      n.includes('futuristic') ||
+      n.includes('wheel') ||
+      n.includes('spoiler') ||
+      n.includes('graffiti')
+    ) {
+      return false;
+    }
+
+    // 2. Allowed true walking surfaces: roads, sidewalk tiles, terrain, plazas, building structures/rooftops
+    return (
+      n.startsWith('road') ||
+      n.startsWith('set_b_tiles') ||
+      n.includes('building') ||
+      n.includes('eco_building') ||
+      n.includes('twistedtower') ||
+      n.includes('ground') ||
+      n.includes('terrain') ||
+      n.includes('sidewalk') ||
+      n.includes('asphalt') ||
+      n.includes('pavement') ||
+      n.includes('plaza')
+    );
+  }
+
   // Ocean & Coastal Seawall Environment
-  private oceanMesh: THREE.Mesh | null = null;
+  private oceanMesh!: THREE.Mesh;
+  private oceanTexture: THREE.CanvasTexture | null = null;
   private oceanMaterial!: THREE.MeshStandardMaterial;
-  private oceanTexture!: THREE.CanvasTexture;
   private seawallGroup: THREE.Group | null = null;
   private shorelineFoamMaterial!: THREE.MeshBasicMaterial;
 
@@ -42,23 +124,58 @@ export class CityEnvironment {
   public currentActivePOI: POI | null = null;
 
   // Traffic lights
-  private trafficTimer: number = 0;
-  private trafficState: 'green' | 'yellow' | 'red' = 'green';
-
-  // Physical signal heads attached to every traffic light pole, driven by TrafficManager's cycle
-  private signalHeads: { lamps: THREE.MeshStandardMaterial[]; glows: THREE.MeshBasicMaterial[]; servesZ: boolean }[] = [];
+  private trafficSignals: TrafficSignalPole[] = [];
+  private trafficPointLights: THREE.PointLight[] = [];
   private currentSignalColor: TrafficLightColor | null = null;
-  private glowTexture: THREE.Texture | null = null;
-  private static lampGeo = new THREE.SphereGeometry(0.13, 12, 10);
-  private static glowGeo = new THREE.PlaneGeometry(0.6, 0.6);
-  private static housingGeo = new THREE.BoxGeometry(0.32, 1.0, 0.3);
-  private static housingMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.7, metalness: 0.2 });
+  private subtleHaloTexture: THREE.Texture | null = null;
+  private static readonly trafficLensGeo = new THREE.SphereGeometry(0.11, 16, 12);
+  private static readonly pedLensGeo = new THREE.SphereGeometry(0.08, 14, 10);
+  private static readonly trafficGlowGeo = new THREE.PlaneGeometry(0.55, 0.55);
+  private static readonly pedGlowGeo = new THREE.PlaneGeometry(0.38, 0.38);
+
+  public static readonly SIGNAL_COLORS = {
+    red: {
+      activeColor: 0xff202b,
+      activeEmissive: 0xff202b,
+      activeIntensity: 4.2,
+      activeRoughness: 0.15,
+      glowColor: 0xff2835,
+      dullColor: 0x240608,
+      dullRoughness: 0.85,
+    },
+    yellow: {
+      activeColor: 0xffa808,
+      activeEmissive: 0xffa808,
+      activeIntensity: 4.2,
+      activeRoughness: 0.15,
+      glowColor: 0xffb814,
+      dullColor: 0x241a04,
+      dullRoughness: 0.85,
+    },
+    green: {
+      activeColor: 0x04f470,
+      activeEmissive: 0x04f470,
+      activeIntensity: 4.2,
+      activeRoughness: 0.15,
+      glowColor: 0x14ff90,
+      dullColor: 0x031c0c,
+      dullRoughness: 0.85,
+    },
+  } as const;
 
   constructor(scene: THREE.Scene, lightingManager: LightingManager) {
     this.scene = scene;
     this.lightingManager = lightingManager;
     this.cityRootGroup = new THREE.Group();
     this.scene.add(this.cityRootGroup);
+
+    // Subtle dynamic scene pointlights for closest traffic light poles
+    for (let i = 0; i < 2; i++) {
+      const pl = new THREE.PointLight(0x04f470, 0, 8.0, 2.0);
+      pl.visible = false;
+      this.scene.add(pl);
+      this.trafficPointLights.push(pl);
+    }
 
     // Create radial gradient ground light pool material for streetlights
     this.groundLightMaterial = new THREE.MeshBasicMaterial({
@@ -74,7 +191,7 @@ export class CityEnvironment {
     });
 
     this.createOcean();
-    this.createCoastalSeawalls();
+    // Infinite city: no perimeter seawall barriers
     this.createPOIBeacons();
   }
 
@@ -323,7 +440,13 @@ export class CityEnvironment {
             }
 
             // Hide static parked car nodes so TrafficManager drives working vehicles!
-            if (name.startsWith('Car_') || name.startsWith('Van') || name.startsWith('Futuristic_Car')) {
+            // Also hide stray Billboard Line wires that cut across roads at street level
+            if (
+              name.startsWith('Car_') ||
+              name.startsWith('Van') ||
+              name.startsWith('Futuristic_Car') ||
+              name.includes('Line')
+            ) {
               node.visible = false;
             }
 
@@ -331,7 +454,7 @@ export class CityEnvironment {
               const mesh = node as THREE.Mesh;
               mesh.castShadow = true;
               mesh.receiveShadow = true;
-              if (node.visible) {
+              if (node.visible && CityEnvironment.isWalkableMesh(name)) {
                 this.walkableMeshes.push(mesh);
               }
 
@@ -414,7 +537,16 @@ export class CityEnvironment {
                   this.windowMaterials.push(stdMat);
                 }
                 if (m.name === 'Emissive' && !this.bulbMaterials.includes(stdMat)) {
-                  this.bulbMaterials.push(stdMat);
+                  const parentName = (node.parent?.name || '').toLowerCase();
+                  if (
+                    !name.toLowerCase().includes('traffic') &&
+                    !parentName.includes('traffic') &&
+                    !name.includes('111_1') &&
+                    !name.includes('124_1') &&
+                    !name.includes('107_1')
+                  ) {
+                    this.bulbMaterials.push(stdMat);
+                  }
                 }
                 if (m.name === 'Billboard' && !this.billboardMaterials.includes(stdMat)) {
                   this.billboardMaterials.push(stdMat);
@@ -449,27 +581,42 @@ export class CityEnvironment {
                 const box = new THREE.Box3().setFromObject(node);
                 const size = new THREE.Vector3();
                 box.getSize(size);
-                // Sanity guard: no single building footprint is wider than a city block
-                if (size.x > 0.4 && size.z > 0.4 && size.x < 70 && size.z < 70) {
-                  // Special stepped terrace colliders for Eco_Building_Slope
-                  if (name.includes('Eco_Building_Slope')) {
-                    const tier1 = new THREE.Box3(
-                      new THREE.Vector3(box.min.x, box.min.y, box.min.z),
-                      new THREE.Vector3(box.max.x, box.min.y + 14.5, box.max.z)
-                    );
-                    const tier2 = new THREE.Box3(
-                      new THREE.Vector3(box.min.x + 0.5, box.min.y + 14.5, box.min.z + 4.0),
-                      new THREE.Vector3(box.max.x - 0.5, box.min.y + 28.5, box.max.z)
-                    );
-                    const tier3 = new THREE.Box3(
-                      new THREE.Vector3(box.min.x + 1.0, box.min.y + 28.5, box.min.z + 10.0),
-                      new THREE.Vector3(box.max.x - 1.0, box.min.y + 42.5, box.max.z)
-                    );
-                    const tier4 = new THREE.Box3(
-                      new THREE.Vector3(box.min.x + 1.5, box.min.y + 42.5, box.min.z + 18.0),
-                      new THREE.Vector3(box.max.x - 1.5, box.max.y, box.max.z)
-                    );
-                    this.baseColliders.push(tier1, tier2, tier3, tier4);
+                // Sanity guard: buildings scaled by CITY_SCALE (2.5) are up to ~110m wide; filter whole-city root
+                if (size.x > 0.4 && size.z > 0.4 && size.x < 160 && size.z < 180) {
+                  // Landmark Buildings: Register exact street-level base footprints (leaving all small roads,
+                  // alleys, cross-streets, and plazas open) and elevated upper volumes for high-altitude flight
+                  if (name.includes('TwistedTower')) {
+                    // Ground level base: opens up the 17m road/plaza at Z[75, 92] and X[43, 57]
+                    this.baseColliders.push(new THREE.Box3(new THREE.Vector3(57.5, 0, 92.0), new THREE.Vector3(100.5, 35.0, 146.1)));
+                    // Upper tower: covers the twisted cantilever at altitude for jetpack flight
+                    this.baseColliders.push(new THREE.Box3(new THREE.Vector3(43.6, 35.0, 75.0), new THREE.Vector3(107.1, 133.0, 154.4)));
+                  } else if (name.includes('Eco_Building_Slope001')) {
+                    // Ground level base: opens up the 10m eastern sidewalk/small road at X[-25.2, -15.1]
+                    this.baseColliders.push(new THREE.Box3(new THREE.Vector3(-107.0, 0, -3.8), new THREE.Vector3(-25.2, 35.0, 43.9)));
+                    // Upper slope for high-altitude flight
+                    this.baseColliders.push(new THREE.Box3(new THREE.Vector3(-111.3, 35.0, -4.2), new THREE.Vector3(-15.1, 144.0, 43.9)));
+                  } else if (name.includes('Eco_Building_Slope004')) {
+                    this.baseColliders.push(new THREE.Box3(new THREE.Vector3(-107.7, 0, 107.3), new THREE.Vector3(-25.8, 35.0, 155.0)));
+                    this.baseColliders.push(new THREE.Box3(new THREE.Vector3(-112.0, 35.0, 106.9), new THREE.Vector3(-15.8, 144.0, 155.0)));
+                  } else if (name.includes('Eco_Building_Slope005')) {
+                    this.baseColliders.push(new THREE.Box3(new THREE.Vector3(-107.0, 0, -116.6), new THREE.Vector3(-25.2, 35.0, -68.9)));
+                    this.baseColliders.push(new THREE.Box3(new THREE.Vector3(-111.3, 35.0, -117.0), new THREE.Vector3(-15.1, 144.0, -68.9)));
+                  } else if (name.includes('Eco_Building_Grid005')) {
+                    // Ground level base: opens up cross-streets at Z < -50 and Z > 16
+                    this.baseColliders.push(new THREE.Box3(new THREE.Vector3(62.6, 0, -50.0), new THREE.Vector3(106.0, 35.0, 16.1)));
+                    this.baseColliders.push(new THREE.Box3(new THREE.Vector3(60.1, 35.0, -55.6), new THREE.Vector3(106.3, 130.0, 21.6)));
+                  } else if (name.includes('Eco_Building_Terrace008')) {
+                    // Ground level base: opens up southern cross-street at Z < -147.5
+                    this.baseColliders.push(new THREE.Box3(new THREE.Vector3(59.7, 0, -147.5), new THREE.Vector3(107.4, 25.0, -65.7)));
+                    this.baseColliders.push(new THREE.Box3(new THREE.Vector3(59.7, 25.0, -157.6), new THREE.Vector3(107.4, 61.0, -62.0)));
+                  } else if (name.includes('Fountain')) {
+                    // Plaza fountains: compact central box so cars and pedestrians can drive and walk around in the plaza
+                    const fCenter = new THREE.Vector3();
+                    box.getCenter(fCenter);
+                    this.baseColliders.push(new THREE.Box3(
+                      new THREE.Vector3(fCenter.x - 4.2, 0, fCenter.z - 4.2),
+                      new THREE.Vector3(fCenter.x + 4.2, 3.5, fCenter.z + 4.2)
+                    ));
                   } else {
                     this.baseColliders.push(box);
                   }
@@ -477,39 +624,39 @@ export class CityEnvironment {
               }
             }
 
-            // 3. Traffic Light Poles (vertical base pole solid collider) + working signal heads
+            // 3. Traffic Light Poles (slim vertical pole collider) + working signal heads
             if (name.startsWith('traffic_light') && !name.includes('Bulb') && !name.includes('Line')) {
               node.updateMatrixWorld(true);
               const polePos = new THREE.Vector3();
               node.getWorldPosition(polePos);
               const poleBox = new THREE.Box3(
-                new THREE.Vector3(polePos.x - 0.55, 0, polePos.z - 0.55),
-                new THREE.Vector3(polePos.x + 0.55, 5.0, polePos.z + 0.55)
+                new THREE.Vector3(polePos.x - 0.22, 0, polePos.z - 0.22),
+                new THREE.Vector3(polePos.x + 0.22, 4.5, polePos.z + 0.22)
               );
               this.baseColliders.push(poleBox);
-              this.attachSignalHead(node, polePos);
+              this.setupTrafficLightModel(node, polePos);
             }
 
-            // 4. Streetlight Poles (vertical base pole solid collider)
+            // 4. Streetlight Poles (slim vertical pole collider)
             if (name.startsWith('Spotlight_01') || name.startsWith('Spotlight_02')) {
               node.updateMatrixWorld(true);
               const lightPos = new THREE.Vector3();
               node.getWorldPosition(lightPos);
               const lightBox = new THREE.Box3(
-                new THREE.Vector3(lightPos.x - 0.45, 0, lightPos.z - 0.45),
-                new THREE.Vector3(lightPos.x + 0.45, 5.0, lightPos.z + 0.45)
+                new THREE.Vector3(lightPos.x - 0.20, 0, lightPos.z - 0.20),
+                new THREE.Vector3(lightPos.x + 0.20, 4.5, lightPos.z + 0.20)
               );
               this.baseColliders.push(lightBox);
             }
 
-            // 5. Palm Trees
+            // 5. Palm Trees (slim trunk collider)
             if (name.startsWith('Palm')) {
               node.updateMatrixWorld(true);
               const palmPos = new THREE.Vector3();
               node.getWorldPosition(palmPos);
               const palmBox = new THREE.Box3(
-                new THREE.Vector3(palmPos.x - 0.45, 0, palmPos.z - 0.45),
-                new THREE.Vector3(palmPos.x + 0.45, 5.0, palmPos.z + 0.45)
+                new THREE.Vector3(palmPos.x - 0.25, 0, palmPos.z - 0.25),
+                new THREE.Vector3(palmPos.x + 0.25, 4.5, palmPos.z + 0.25)
               );
               this.baseColliders.push(palmBox);
             }
@@ -520,34 +667,26 @@ export class CityEnvironment {
               const billPos = new THREE.Vector3();
               node.getWorldPosition(billPos);
               const billBox = new THREE.Box3(
-                new THREE.Vector3(billPos.x - 0.55, 0, billPos.z - 0.55),
-                new THREE.Vector3(billPos.x + 0.55, 5.0, billPos.z + 0.55)
+                new THREE.Vector3(billPos.x - 0.35, 0, billPos.z - 0.35),
+                new THREE.Vector3(billPos.x + 0.35, 4.5, billPos.z + 0.35)
               );
               this.baseColliders.push(billBox);
             }
           });
 
-          // Add file-accurate city model directly to the scene at (0, 0, 0)
-          this.cityRootGroup.add(cityModel);
-
-          // Add perimeter boundary colliders aligned precisely with the coastal seawall retaining wall
-          const boundX = 58.5 * CITY_SCALE;
-          const boundZ = 73.5 * CITY_SCALE;
-          this.baseColliders.push(
-            new THREE.Box3(new THREE.Vector3(-boundX - 6, -2, -boundZ - 8), new THREE.Vector3(-boundX, 12.0, boundZ + 8)), // West seawall boundary
-            new THREE.Box3(new THREE.Vector3(boundX, -2, -boundZ - 8), new THREE.Vector3(boundX + 6, 12.0, boundZ + 8)),   // East seawall boundary
-            new THREE.Box3(new THREE.Vector3(-boundX - 8, -2, -boundZ - 6), new THREE.Vector3(boundX + 8, 12.0, -boundZ)), // South seawall boundary
-            new THREE.Box3(new THREE.Vector3(-boundX - 8, -2, boundZ), new THREE.Vector3(boundX + 8, 12.0, boundZ + 6))   // North seawall boundary
-          );
-
-          this.activeColliders = [...this.baseColliders];
+          // Prepare template chunk holding city base and all city props
+          const templateChunk = new THREE.Group();
+          templateChunk.name = 'City_Chunk_Template';
+          templateChunk.add(cityModel);
 
           // Apply initial Day/Night material settings
           this.setDayNightVisuals(this.currentMode);
 
-          // Load extra 3D city props (Bus Stops, Fountains, Palms, Trash Cans) from /models/props
-          this.loadCityProps(loader).finally(() => {
-            this.activeColliders = [...this.baseColliders];
+          // Load extra 3D city props (Bus Stops, Fountains, Palms, Trash Cans) into the template chunk
+          this.loadCityProps(loader, templateChunk).finally(() => {
+            this.templateChunk = templateChunk;
+            this.chunkLocalColliders = [...this.baseColliders];
+            this.initChunkPool();
             resolve();
           });
         },
@@ -564,10 +703,10 @@ export class CityEnvironment {
     });
   }
 
-  private async loadCityProps(loader: GLTFLoader): Promise<void> {
+  private async loadCityProps(loader: GLTFLoader, templateGroup: THREE.Group): Promise<void> {
     const propsGroup = new THREE.Group();
     propsGroup.name = 'City_Props_Pack';
-    this.cityRootGroup.add(propsGroup);
+    templateGroup.add(propsGroup);
 
     // 1. Bus Stop Shelters (Bus_Stop_02.glb)
     try {
@@ -583,9 +722,9 @@ export class CityEnvironment {
 
       const busStopPositions = [
         { x: -22.5, y: 0.1, z: -15.0, rotY: Math.PI / 2 },
-        { x: -10.5, y: 0.1, z: 25.0, rotY: -Math.PI / 2 },
-        { x: 14.5, y: 0.1, z: 85.0, rotY: -Math.PI / 2 },
-        { x: 14.5, y: 0.1, z: -95.0, rotY: -Math.PI / 2 },
+        { x: -18.2, y: 0.1, z: 25.0, rotY: Math.PI / 2 },
+        { x: 38.5, y: 0.1, z: 85.0, rotY: -Math.PI / 2 },
+        { x: 38.5, y: 0.1, z: -95.0, rotY: -Math.PI / 2 },
       ];
 
       for (const pos of busStopPositions) {
@@ -593,11 +732,6 @@ export class CityEnvironment {
         stop.position.set(pos.x, pos.y, pos.z);
         stop.rotation.y = pos.rotY;
         stop.updateMatrixWorld(true);
-        stop.traverse((c) => {
-          if ((c as THREE.Mesh).isMesh) {
-            this.walkableMeshes.push(c as THREE.Mesh);
-          }
-        });
         propsGroup.add(stop);
 
         // Solid collider for the bus stop shelter
@@ -620,7 +754,6 @@ export class CityEnvironment {
         if ((c as THREE.Mesh).isMesh) {
           c.castShadow = true;
           c.receiveShadow = true;
-          this.walkableMeshes.push(c as THREE.Mesh);
         }
       });
       propsGroup.add(fountain);
@@ -676,9 +809,6 @@ export class CityEnvironment {
         palm.position.set(spot.x, 0.1, spot.z);
         palm.rotation.y = Math.random() * Math.PI * 2;
         palm.updateMatrixWorld(true);
-        palm.traverse((c) => {
-          if ((c as THREE.Mesh).isMesh) this.walkableMeshes.push(c as THREE.Mesh);
-        });
         propsGroup.add(palm);
 
         // Solid trunk collider
@@ -707,17 +837,14 @@ export class CityEnvironment {
 
       const trashSpots = [
         { x: -21.0, z: -17.0 },
-        { x: -12.0, z: 27.0 },
-        { x: 13.0, z: 87.0 },
-        { x: 13.0, z: -97.0 },
+        { x: -17.0, z: 32.0 },
+        { x: 38.5, z: 92.0 },
+        { x: 38.5, z: -102.0 },
       ];
       for (const spot of trashSpots) {
         const bin = trashTemplate.clone(true);
         bin.position.set(spot.x, 0.1, spot.z);
         bin.updateMatrixWorld(true);
-        bin.traverse((c) => {
-          if ((c as THREE.Mesh).isMesh) this.walkableMeshes.push(c as THREE.Mesh);
-        });
         propsGroup.add(bin);
 
         // Solid receptacle collider
@@ -732,84 +859,378 @@ export class CityEnvironment {
       console.warn('Could not load Trash_Can_04.glb:', e);
     }
   }
+
   /**
-   * The GLB signal is one mesh sharing a single "Emissive" material with every streetlight, so the
-   * bulbs cannot be lit individually. Instead we mount a real three-lamp head at the end of the arm.
+   * Initializes the 3x3 Dynamic Infinite Chunk Pool.
+   * Total active chunks is strictly capped at 9 (1 center + 8 surrounding neighbors).
+   * Three.js .clone(true) shares GPU BufferGeometry & Materials, so VRAM is not duplicated!
    */
-  private attachSignalHead(node: THREE.Object3D, polePos: THREE.Vector3) {
-    const box = new THREE.Box3().setFromObject(node);
-    if (box.isEmpty()) return;
-    const center = new THREE.Vector3();
-    box.getCenter(center);
+  private initChunkPool() {
+    if (!this.templateChunk) return;
+    this.chunks = [];
+    this.centerChunkX = 0;
+    this.centerChunkZ = 0;
 
-    // The arm reaches out from the pole base; the head hangs at its far end
-    const armX = center.x - polePos.x;
-    const armZ = center.z - polePos.z;
-    const headX = polePos.x + armX * 1.7;
-    const headZ = polePos.z + armZ * 1.7;
-    const headY = box.max.y - 0.55;
-    // An arm spanning east-west hangs over a north-south avenue -> it signals Z-axis traffic
-    const servesZ = Math.abs(armX) >= Math.abs(armZ);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const isCenter = dx === 0 && dz === 0;
+        const chunkGroup = isCenter ? this.templateChunk : this.templateChunk.clone(true);
+        chunkGroup.position.set(dx * CHUNK_WIDTH, 0, dz * CHUNK_DEPTH);
+        chunkGroup.updateMatrixWorld(true);
+        this.cityRootGroup.add(chunkGroup);
 
-    if (!this.glowTexture) this.glowTexture = this.createLightPoolTexture();
-
-    const group = new THREE.Group();
-    group.position.set(headX, headY, headZ);
-    group.rotation.y = servesZ ? 0 : Math.PI / 2;
-    group.add(new THREE.Mesh(CityEnvironment.housingGeo, CityEnvironment.housingMat));
-
-    const lamps: THREE.MeshStandardMaterial[] = [];
-    const glows: THREE.MeshBasicMaterial[] = [];
-    const colors = [0xff2a3c, 0xffb020, 0x22e07a]; // red, amber, green top->bottom
-    colors.forEach((c, i) => {
-      const lampMat = new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.08, roughness: 0.3 });
-      lamps.push(lampMat);
-      // Lamps on both faces so traffic from either direction reads the signal
-      for (const side of [1, -1]) {
-        const lamp = new THREE.Mesh(CityEnvironment.lampGeo, lampMat);
-        lamp.position.set(0, 0.32 - i * 0.32, side * 0.17);
-        group.add(lamp);
-
-        const glowMat = new THREE.MeshBasicMaterial({
-          map: this.glowTexture!,
-          color: c,
-          transparent: true,
-          opacity: 0,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-          side: THREE.DoubleSide,
+        const chunkColliders: THREE.Box3[] = this.chunkLocalColliders.map((box) => {
+          const cb = box.clone();
+          cb.translate(new THREE.Vector3(dx * CHUNK_WIDTH, 0, dz * CHUNK_DEPTH));
+          return cb;
         });
-        glows.push(glowMat);
-        const glow = new THREE.Mesh(CityEnvironment.glowGeo, glowMat);
-        glow.position.set(0, 0.32 - i * 0.32, side * 0.3);
-        if (side < 0) glow.rotation.y = Math.PI;
-        group.add(glow);
+
+        const walkable: THREE.Mesh[] = [];
+        chunkGroup.traverse((node) => {
+          if ((node as THREE.Mesh).isMesh && node.visible) {
+            walkable.push(node as THREE.Mesh);
+          }
+        });
+
+        this.chunks.push({
+          gridX: dx,
+          gridZ: dz,
+          group: chunkGroup,
+          colliders: chunkColliders,
+          walkableMeshes: walkable,
+        });
+      }
+    }
+
+    this.updateSpatialColliders(new THREE.Vector3(0, 0, 0));
+  }
+
+  /**
+   * Shifts chunks when the active focus crosses into a new chunk.
+   * Recycles out-of-range chunks to newly entered grid positions with zero memory allocation.
+   */
+  public updateChunkGrid(focusPos: THREE.Vector3) {
+    if (this.chunks.length === 0) return;
+
+    const targetChunkX = Math.round(focusPos.x / CHUNK_WIDTH);
+    const targetChunkZ = Math.round(focusPos.z / CHUNK_DEPTH);
+
+    if (targetChunkX === this.centerChunkX && targetChunkZ === this.centerChunkZ) {
+      return;
+    }
+
+    this.centerChunkX = targetChunkX;
+    this.centerChunkZ = targetChunkZ;
+
+    // Desired 3x3 coords centered around targetChunk
+    const desiredCoords: { x: number; z: number }[] = [];
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        desiredCoords.push({ x: targetChunkX + dx, z: targetChunkZ + dz });
+      }
+    }
+
+    const availableChunks: CityChunk[] = [];
+    const occupiedCoords = new Set<string>();
+
+    for (const chunk of this.chunks) {
+      const inRange =
+        Math.abs(chunk.gridX - targetChunkX) <= 1 &&
+        Math.abs(chunk.gridZ - targetChunkZ) <= 1;
+      if (inRange) {
+        occupiedCoords.add(`${chunk.gridX},${chunk.gridZ}`);
+      } else {
+        availableChunks.push(chunk);
+      }
+    }
+
+    // Reposition recycled chunks into missing slots
+    for (const target of desiredCoords) {
+      const key = `${target.x},${target.z}`;
+      if (!occupiedCoords.has(key)) {
+        const recycled = availableChunks.pop();
+        if (recycled) {
+          recycled.gridX = target.x;
+          recycled.gridZ = target.z;
+          recycled.group.position.set(target.x * CHUNK_WIDTH, 0, target.z * CHUNK_DEPTH);
+          recycled.group.updateMatrixWorld(true);
+
+          const offsetX = target.x * CHUNK_WIDTH;
+          const offsetZ = target.z * CHUNK_DEPTH;
+          for (let i = 0; i < this.chunkLocalColliders.length; i++) {
+            const baseBox = this.chunkLocalColliders[i];
+            recycled.colliders[i].min.set(baseBox.min.x + offsetX, baseBox.min.y, baseBox.min.z + offsetZ);
+            recycled.colliders[i].max.set(baseBox.max.x + offsetX, baseBox.max.y, baseBox.max.z + offsetZ);
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Spatially partitions colliders and walkable meshes for constant-time O(1) physics.
+   * Limits active collision test set to ~40-80 nearest boxes around the player/vehicle.
+   */
+  public updateSpatialColliders(focusPos: THREE.Vector3) {
+    if (this.chunks.length === 0) return;
+
+    const radius = 110.0;
+    const radiusSq = radius * radius;
+    const nearColliders: THREE.Box3[] = [];
+    const nearWalkable: THREE.Mesh[] = [];
+
+    for (let c = 0; c < this.chunks.length; c++) {
+      const chunk = this.chunks[c];
+      const chunkCenterX = chunk.gridX * CHUNK_WIDTH;
+      const chunkCenterZ = chunk.gridZ * CHUNK_DEPTH;
+      const chunkDistX = Math.abs(focusPos.x - chunkCenterX);
+      const chunkDistZ = Math.abs(focusPos.z - chunkCenterZ);
+
+      // Broadphase check: is chunk within reach?
+      if (chunkDistX <= CHUNK_WIDTH * 0.5 + radius && chunkDistZ <= CHUNK_DEPTH * 0.5 + radius) {
+        for (let b = 0; b < chunk.colliders.length; b++) {
+          const box = chunk.colliders[b];
+          const midX = (box.min.x + box.max.x) * 0.5;
+          const midZ = (box.min.z + box.max.z) * 0.5;
+          const dx = midX - focusPos.x;
+          const dz = midZ - focusPos.z;
+          if (dx * dx + dz * dz < radiusSq) {
+            nearColliders.push(box);
+          }
+        }
+      }
+
+      // Collect walkable meshes within near vicinity (~60m reach)
+      if (chunkDistX <= CHUNK_WIDTH * 0.5 + 40 && chunkDistZ <= CHUNK_DEPTH * 0.5 + 40) {
+        nearWalkable.push(...chunk.walkableMeshes);
+      }
+    }
+
+    this.activeColliders = nearColliders;
+    this.baseColliders = nearColliders;
+    this.walkableMeshes = nearWalkable;
+  }
+
+  /**
+   * Returns colliders near a specific coordinate (for safe respawns / mission spawns).
+   */
+  public getCollidersNear(pos: THREE.Vector3, radius: number = 40): THREE.Box3[] {
+    const rSq = radius * radius;
+    const result: THREE.Box3[] = [];
+    for (let c = 0; c < this.chunks.length; c++) {
+      const chunk = this.chunks[c];
+      const chunkDistX = Math.abs(pos.x - chunk.gridX * CHUNK_WIDTH);
+      const chunkDistZ = Math.abs(pos.z - chunk.gridZ * CHUNK_DEPTH);
+      if (chunkDistX <= CHUNK_WIDTH * 0.5 + radius && chunkDistZ <= CHUNK_DEPTH * 0.5 + radius) {
+        for (let b = 0; b < chunk.colliders.length; b++) {
+          const box = chunk.colliders[b];
+          const midX = (box.min.x + box.max.x) * 0.5;
+          const midZ = (box.min.z + box.max.z) * 0.5;
+          const dx = midX - pos.x;
+          const dz = midZ - pos.z;
+          if (dx * dx + dz * dz < rSq) {
+            result.push(box);
+          }
+        }
+      }
+    }
+    return result;
+  }
+
+  private getSubtleHaloTexture(): THREE.Texture {
+    if (this.subtleHaloTexture) return this.subtleHaloTexture;
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      // High-definition radial bloom profile: soft core, gentle feathered exponential falloff
+      const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 63);
+      grad.addColorStop(0.0, 'rgba(255, 255, 255, 1.0)');
+      grad.addColorStop(0.18, 'rgba(255, 255, 255, 0.85)');
+      grad.addColorStop(0.42, 'rgba(255, 255, 255, 0.40)');
+      grad.addColorStop(0.70, 'rgba(255, 255, 255, 0.12)');
+      grad.addColorStop(1.0, 'rgba(255, 255, 255, 0.0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 128, 128);
+    }
+    this.subtleHaloTexture = new THREE.CanvasTexture(canvas);
+    this.subtleHaloTexture.needsUpdate = true;
+    return this.subtleHaloTexture;
+  }
+
+  /**
+   * Configures real signal lenses and subtle blooming light halos directly on the 3D traffic light model.
+   * Inactive lights appear completely dull and unlit; active lights emit bright light with a soft radial halo.
+   */
+  private setupTrafficLightModel(node: THREE.Object3D, polePos: THREE.Vector3) {
+    // 1. Hide the original unseparated emissive mesh from the GLB model
+    node.children.forEach((c: any) => {
+      if (c.material && c.material.name === 'Emissive') {
+        c.visible = false;
       }
     });
 
-    this.scene.add(group);
-    this.signalHeads.push({ lamps, glows, servesZ });
+    node.updateMatrixWorld(true);
+    const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(node.quaternion);
+    const servesZ = Math.abs(fwd.z) >= Math.abs(fwd.x);
+
+    const haloTexture = this.getSubtleHaloTexture();
+    const lamps: TrafficSignalLamp[] = [];
+
+    const addLamp = (
+      type: 'traffic' | 'pedestrian',
+      col: 'red' | 'yellow' | 'green',
+      pos: THREE.Vector3,
+      normal: THREE.Vector3 = new THREE.Vector3(0, 0, 1),
+      isPed: boolean = false
+    ) => {
+      const cConf = CityEnvironment.SIGNAL_COLORS[col];
+      // Lens initially dull and unlit
+      const mat = new THREE.MeshStandardMaterial({
+        color: cConf.dullColor,
+        emissive: 0x000000,
+        emissiveIntensity: 0.0,
+        roughness: cConf.dullRoughness,
+        metalness: 0.1,
+      });
+
+      const lens = new THREE.Mesh(isPed ? CityEnvironment.pedLensGeo : CityEnvironment.trafficLensGeo, mat);
+      lens.position.copy(pos);
+      lens.scale.set(1.0, 1.0, 0.35);
+
+      if (normal.z < -0.5) lens.rotation.y = Math.PI;
+      else if (normal.x > 0.5) lens.rotation.y = Math.PI / 2;
+      else if (normal.x < -0.5) lens.rotation.y = -Math.PI / 2;
+      node.add(lens);
+
+      // Subtle light halo around the active light
+      const glowMat = new THREE.MeshBasicMaterial({
+        map: haloTexture,
+        color: cConf.glowColor,
+        transparent: true,
+        opacity: 0.0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+
+      const glowMesh = new THREE.Mesh(isPed ? CityEnvironment.pedGlowGeo : CityEnvironment.trafficGlowGeo, glowMat);
+      glowMesh.position.copy(pos).add(normal.clone().multiplyScalar(0.018));
+      glowMesh.rotation.copy(lens.rotation);
+      glowMesh.visible = false;
+      node.add(glowMesh);
+
+      lamps.push({ type, color: col, mat, glowMat, glowMesh });
+    };
+
+    let overheadLocalPos: THREE.Vector3 | undefined;
+    const name = node.name || '';
+
+    if (name.includes('001')) {
+      // Overhead cantilever arm signal (facing +Z)
+      addLamp('traffic', 'red', new THREE.Vector3(3.692, 5.690, 0.203), new THREE.Vector3(0, 0, 1));
+      addLamp('traffic', 'yellow', new THREE.Vector3(3.692, 5.375, 0.203), new THREE.Vector3(0, 0, 1));
+      addLamp('traffic', 'green', new THREE.Vector3(3.692, 5.064, 0.203), new THREE.Vector3(0, 0, 1));
+      overheadLocalPos = new THREE.Vector3(3.692, 5.375, 0.203);
+    } else if (name.includes('002')) {
+      // Master intersection pole:
+      // 1. Overhead cantilever arm (+Z face, facing +Z)
+      addLamp('traffic', 'red', new THREE.Vector3(-3.692, 5.690, 0.203), new THREE.Vector3(0, 0, 1));
+      addLamp('traffic', 'yellow', new THREE.Vector3(-3.692, 5.375, 0.203), new THREE.Vector3(0, 0, 1));
+      addLamp('traffic', 'green', new THREE.Vector3(-3.692, 5.064, 0.203), new THREE.Vector3(0, 0, 1));
+      // 2. Overhead cantilever arm (-Z face, facing -Z)
+      addLamp('traffic', 'red', new THREE.Vector3(-3.692, 5.690, -0.206), new THREE.Vector3(0, 0, -1));
+      addLamp('traffic', 'yellow', new THREE.Vector3(-3.692, 5.375, -0.206), new THREE.Vector3(0, 0, -1));
+      addLamp('traffic', 'green', new THREE.Vector3(-3.692, 5.064, -0.206), new THREE.Vector3(0, 0, -1));
+      // 3. Post-mounted secondary traffic signal (+Z face)
+      addLamp('traffic', 'red', new THREE.Vector3(-0.379, 3.625, 0.205), new THREE.Vector3(0, 0, 1));
+      addLamp('traffic', 'yellow', new THREE.Vector3(-0.379, 3.310, 0.205), new THREE.Vector3(0, 0, 1));
+      addLamp('traffic', 'green', new THREE.Vector3(-0.379, 2.999, 0.205), new THREE.Vector3(0, 0, 1));
+      // 4. Pedestrian signal (+X and -X faces)
+      addLamp('pedestrian', 'red', new THREE.Vector3(0.055, 2.467, -0.333), new THREE.Vector3(1, 0, 0), true);
+      addLamp('pedestrian', 'green', new THREE.Vector3(0.055, 2.193, -0.333), new THREE.Vector3(1, 0, 0), true);
+      addLamp('pedestrian', 'red', new THREE.Vector3(-0.065, 2.467, -0.333), new THREE.Vector3(-1, 0, 0), true);
+      addLamp('pedestrian', 'green', new THREE.Vector3(-0.065, 2.193, -0.333), new THREE.Vector3(-1, 0, 0), true);
+      overheadLocalPos = new THREE.Vector3(-3.692, 5.375, 0.0);
+    } else if (name.includes('003')) {
+      // Standalone pedestrian crossing pole (+Z and -Z faces)
+      addLamp('pedestrian', 'red', new THREE.Vector3(0.333, 2.467, 0.052), new THREE.Vector3(0, 0, 1), true);
+      addLamp('pedestrian', 'green', new THREE.Vector3(0.333, 2.193, 0.052), new THREE.Vector3(0, 0, 1), true);
+      addLamp('pedestrian', 'red', new THREE.Vector3(0.333, 2.467, -0.062), new THREE.Vector3(0, 0, -1), true);
+      addLamp('pedestrian', 'green', new THREE.Vector3(0.333, 2.193, -0.062), new THREE.Vector3(0, 0, -1), true);
+      overheadLocalPos = new THREE.Vector3(0.333, 2.33, 0.0);
+    }
+
+    const overheadWorldPos = overheadLocalPos ? overheadLocalPos.clone().applyMatrix4(node.matrixWorld) : undefined;
+    this.trafficSignals.push({
+      name,
+      node,
+      servesZ,
+      worldPos: polePos.clone(),
+      overheadPos: overheadWorldPos,
+      lamps,
+    });
   }
 
-  /** Light the signal heads for the current global cycle (called every frame; cheap when unchanged). */
+  /** Light the signal heads for the current global cycle */
   public setTrafficLightState(color: TrafficLightColor) {
     if (color === this.currentSignalColor) return;
     this.currentSignalColor = color;
+    this.applyTrafficLightVisuals(color);
+  }
+
+  private applyTrafficLightVisuals(color: TrafficLightColor) {
     const opposite: TrafficLightColor = color === 'green' ? 'red' : color === 'red' ? 'green' : 'yellow';
-    for (const head of this.signalHeads) {
-      const shown = head.servesZ ? color : opposite;
-      const litIdx = shown === 'red' ? 0 : shown === 'yellow' ? 1 : 2;
-      head.lamps.forEach((m, i) => {
-        m.emissiveIntensity = i === litIdx ? 2.8 : 0.08;
-      });
-      head.glows.forEach((g, i) => {
-        g.opacity = Math.floor(i / 2) === litIdx ? 0.55 : 0;
-      });
+    const isNight = this.currentMode === 'night';
+    const haloOpacity = isNight ? 0.78 : this.currentMode === 'sunset' ? 0.68 : 0.55;
+
+    for (const signal of this.trafficSignals) {
+      const activeColor = signal.servesZ ? color : opposite;
+      const pedActiveColor = activeColor === 'green' ? 'red' : 'green';
+
+      for (const lamp of signal.lamps) {
+        const isActive = lamp.type === 'traffic'
+          ? (lamp.color === activeColor)
+          : (lamp.color === pedActiveColor);
+
+        const cConf = CityEnvironment.SIGNAL_COLORS[lamp.color];
+
+        if (isActive) {
+          // Active light: bright vibrant color, high emissive intensity, smooth reflection
+          lamp.mat.color.setHex(cConf.activeColor);
+          lamp.mat.emissive.setHex(cConf.activeEmissive);
+          lamp.mat.emissiveIntensity = isNight ? 4.8 : 4.0;
+          lamp.mat.roughness = cConf.activeRoughness;
+          // Subtle light halo radiating around the active lamp
+          lamp.glowMat.color.setHex(cConf.glowColor);
+          lamp.glowMat.opacity = haloOpacity;
+          lamp.glowMesh.visible = true;
+        } else {
+          // Inactive light: dull dark color, zero emissive, high matte roughness, no light around it
+          lamp.mat.color.setHex(cConf.dullColor);
+          lamp.mat.emissive.setHex(0x000000);
+          lamp.mat.emissiveIntensity = 0.0;
+          lamp.mat.roughness = cConf.dullRoughness;
+          lamp.glowMat.opacity = 0.0;
+          lamp.glowMesh.visible = false;
+        }
+      }
     }
   }
 
   update(carPos: THREE.Vector3, delta: number, onPOIEnter?: (poi: POI) => void): POI | null {
     const dt = Math.min(delta, 0.1);
+
+    // 0. Dynamic 3x3 Chunk Grid shift & constant-time spatial collision broadphase
+    this.updateChunkGrid(carPos);
+    this.updateSpatialColliders(carPos);
+
+    // Ocean water plane follows player to provide an endless horizon
+    if (this.oceanMesh) {
+      this.oceanMesh.position.x = carPos.x;
+      this.oceanMesh.position.z = carPos.z;
+    }
 
     // 1. Animate Ocean Waves and Shoreline Foam
     if (this.oceanTexture) {
@@ -847,11 +1268,50 @@ export class CityEnvironment {
       this.currentActivePOI = null;
     }
 
-    // 3. Traffic Light Timer Cycle
-    this.trafficTimer += dt;
-    if (this.trafficTimer > 6.0) {
-      this.trafficTimer = 0;
-      this.trafficState = this.trafficState === 'green' ? 'yellow' : this.trafficState === 'yellow' ? 'red' : 'green';
+    // 3. Subtle dynamic scene pointlights for closest traffic light poles across active chunks
+    if (this.trafficPointLights.length > 0 && this.trafficSignals.length > 0 && this.chunks.length > 0) {
+      let nearestOverhead: THREE.Vector3 | null = null;
+      let nearestDistSq = Infinity;
+      let nearestServesZ = true;
+
+      for (let c = 0; c < this.chunks.length; c++) {
+        const chunk = this.chunks[c];
+        const offsetX = chunk.gridX * CHUNK_WIDTH;
+        const offsetZ = chunk.gridZ * CHUNK_DEPTH;
+
+        for (let s = 0; s < this.trafficSignals.length; s++) {
+          const sig = this.trafficSignals[s];
+          if (!sig.overheadPos) continue;
+
+          const wx = sig.worldPos.x + offsetX;
+          const wz = sig.worldPos.z + offsetZ;
+          const dSq = (wx - carPos.x) ** 2 + (wz - carPos.z) ** 2;
+          if (dSq < nearestDistSq) {
+            nearestDistSq = dSq;
+            nearestServesZ = sig.servesZ;
+            nearestOverhead = new THREE.Vector3(sig.overheadPos.x + offsetX, sig.overheadPos.y, sig.overheadPos.z + offsetZ);
+          }
+        }
+      }
+
+      const isNight = this.currentMode === 'night';
+      const intensity = isNight ? 2.6 : this.currentMode === 'sunset' ? 1.8 : 1.2;
+
+      for (let i = 0; i < this.trafficPointLights.length; i++) {
+        const pl = this.trafficPointLights[i];
+        if (i === 0 && nearestOverhead && nearestDistSq < 2025) {
+          pl.position.copy(nearestOverhead);
+          const activeColor = nearestServesZ
+            ? (this.currentSignalColor || 'green')
+            : (this.currentSignalColor === 'green' ? 'red' : this.currentSignalColor === 'red' ? 'green' : 'yellow');
+          const cConf = CityEnvironment.SIGNAL_COLORS[activeColor];
+          pl.color.setHex(cConf.activeColor);
+          pl.intensity = intensity;
+          pl.visible = true;
+        } else {
+          pl.visible = false;
+        }
+      }
     }
 
     return this.currentActivePOI;
@@ -954,6 +1414,11 @@ export class CityEnvironment {
         this.oceanMaterial.metalness = 0.22;
       }
       this.oceanMaterial.needsUpdate = true;
+    }
+
+    // 7. Refresh Traffic Light active halos and emissive intensities for day/night
+    if (this.currentSignalColor) {
+      this.applyTrafficLightVisuals(this.currentSignalColor);
     }
   }
 

@@ -98,6 +98,11 @@ export class RemotePlayerManager {
 
     const pos = new THREE.Vector3(state.position[0], state.position[1], state.position[2]);
 
+    if (player.snapshots.length === 0) {
+      player.currentPos.copy(pos);
+      player.currentHeading = state.heading;
+    }
+
     player.snapshots.push({
       time: performance.now(),
       position: pos,
@@ -318,6 +323,16 @@ export class RemotePlayerManager {
 
       this.updateNametagSprite(player);
     });
+
+    // Cleanup stale disconnected players (no packets for > 15 seconds)
+    const now = performance.now();
+    const staleIds: string[] = [];
+    this.players.forEach((player, id) => {
+      if (now - player.lastPacketTime > 15000) {
+        staleIds.push(id);
+      }
+    });
+    staleIds.forEach((id) => this.handlePlayerLeft(id));
   }
 
   private switchRemoteVehicleModel(player: RemotePlayerEntity, modelId: VehicleModelId) {
@@ -373,11 +388,24 @@ export class RemotePlayerManager {
         x: p.currentPos.x,
         z: p.currentPos.z,
         kind: 'player',
-        color: p.mode === 'driving' ? '#38bdf8' : '#34d399',
+        color: p.mode === 'driving' ? '#00f0ff' : '#10b981',
         heading: p.currentHeading,
+        label: p.name,
       });
     });
     return blips;
+  }
+
+  /**
+   * Returns active online players with distance calculations.
+   */
+  public getOnlinePlayersList(localPos?: THREE.Vector3) {
+    const list: Array<{ id: string; name: string; mode: 'on_foot' | 'driving' | 'passenger'; ping: number; distance: number }> = [];
+    this.players.forEach((p) => {
+      const dist = localPos ? Math.round(p.currentPos.distanceTo(localPos)) : 0;
+      list.push({ id: p.id, name: p.name, mode: p.mode, ping: p.ping, distance: dist });
+    });
+    return list;
   }
 
   /**

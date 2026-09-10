@@ -10,13 +10,49 @@ interface SkidSegment {
   initialAlpha: number;
 }
 
-interface TrailPoint {
-  pos: THREE.Vector3;
+interface GroundFireSegment {
+  active: boolean;
+  position: THREE.Vector3;
+  heading: number;
   age: number;
   maxAge: number;
-  color: THREE.Color;
-  width: number;
+  initialAlpha: number;
 }
+
+interface FireParticle {
+  active: boolean;
+  pos: THREE.Vector3;
+  vel: THREE.Vector3;
+  age: number;
+  maxAge: number;
+  startSize: number;
+  endSize: number;
+}
+
+const FIRE_VERT = /* glsl */ `
+  attribute float size;
+  attribute float alpha;
+  varying vec3 vColor;
+  varying float vAlpha;
+  void main() {
+    vColor = color;
+    vAlpha = alpha;
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    gl_PointSize = size * (340.0 / max(0.5, -mvPosition.z));
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+const FIRE_FRAG = /* glsl */ `
+  uniform sampler2D map;
+  varying vec3 vColor;
+  varying float vAlpha;
+  void main() {
+    vec4 tex = texture2D(map, gl_PointCoord);
+    gl_FragColor = vec4(vColor, tex.a * vAlpha);
+    if (gl_FragColor.a < 0.01) discard;
+  }
+`;
 
 export class TireEffectsManager {
   private scene: THREE.Scene;
@@ -42,19 +78,32 @@ export class TireEffectsManager {
   private hasLastFL = false;
   private hasLastFR = false;
 
-  // 2. Tron Light Trail Wall (Vertical energy wall streaming behind car)
-  private static readonly MAX_TRAIL_POINTS = 140;
-  private trailTexture: THREE.Texture;
-  private flareTexture: THREE.Texture;
+  // 2. High-Performance Nitro Fire Trail System (Roaring dual exhaust flames & sparks)
+  private static readonly MAX_FIRE_PARTICLES = 360;
+  private fireParticles: FireParticle[] = [];
+  private firePoints: THREE.Points;
+  private fireGeometry: THREE.BufferGeometry;
+  private fireMaterial: THREE.ShaderMaterial;
+  private fireTexture: THREE.Texture;
+  private fireNextIndex: number = 0;
 
-  private leftTrailMesh!: THREE.Mesh;
-  private rightTrailMesh!: THREE.Mesh;
-  private leftPoints: TrailPoint[] = [];
-  private rightPoints: TrailPoint[] = [];
+  private firePositions = new Float32Array(TireEffectsManager.MAX_FIRE_PARTICLES * 3);
+  private fireColors = new Float32Array(TireEffectsManager.MAX_FIRE_PARTICLES * 3);
+  private fireSizes = new Float32Array(TireEffectsManager.MAX_FIRE_PARTICLES);
+  private fireAlphas = new Float32Array(TireEffectsManager.MAX_FIRE_PARTICLES);
 
-  // Taillight glowing lens flares
-  private leftFlare!: THREE.Sprite;
-  private rightFlare!: THREE.Sprite;
+  // 3. Ground Fire Burn Streaks (fiery patches on tarmac under exhaust)
+  private static readonly MAX_GROUND_FIRE = 80;
+  private groundFireMesh: THREE.InstancedMesh;
+  private groundFireSegments: GroundFireSegment[] = [];
+  private groundFireNextIndex: number = 0;
+  private groundFireOpacities = new Float32Array(TireEffectsManager.MAX_GROUND_FIRE);
+  private groundFireOpacityAttr: THREE.InstancedBufferAttribute;
+  private groundFireTexture: THREE.Texture;
+
+  // Dynamic exhaust fire illumination
+  private fireLight: THREE.PointLight;
+  private fireLightPulse: number = 0;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -128,32 +177,133 @@ export class TireEffectsManager {
     this.skidOpacityAttr.needsUpdate = true;
     this.scene.add(this.skidMesh);
 
-    // --- Create Tron Light Trail Walls ---
-    this.trailTexture = this.createTrailTexture();
-    this.flareTexture = this.createFlareTexture();
+    // --- Create Nitro Exhaust Fire Particle System ---
+    this.fireTexture = this.createFireTexture();
 
-    this.leftTrailMesh = this.createRibbonMesh();
-    this.rightTrailMesh = this.createRibbonMesh();
-    this.scene.add(this.leftTrailMesh);
-    this.scene.add(this.rightTrailMesh);
+    this.fireGeometry = new THREE.BufferGeometry();
+    this.fireGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(this.firePositions, 3).setUsage(THREE.DynamicDrawUsage)
+    );
+    this.fireGeometry.setAttribute(
+      'color',
+      new THREE.BufferAttribute(this.fireColors, 3).setUsage(THREE.DynamicDrawUsage)
+    );
+    this.fireGeometry.setAttribute(
+      'size',
+      new THREE.BufferAttribute(this.fireSizes, 1).setUsage(THREE.DynamicDrawUsage)
+    );
+    this.fireGeometry.setAttribute(
+      'alpha',
+      new THREE.BufferAttribute(this.fireAlphas, 1).setUsage(THREE.DynamicDrawUsage)
+    );
 
-    // Taillight lens flares
-    const flareMatL = new THREE.SpriteMaterial({
-      map: this.flareTexture,
-      color: 0x00f5ff,
+    this.fireMaterial = new THREE.ShaderMaterial({
+      vertexShader: FIRE_VERT,
+      fragmentShader: FIRE_FRAG,
+      uniforms: {
+        map: { value: this.fireTexture },
+      },
+      vertexColors: true,
       transparent: true,
-      opacity: 0.0,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
-    const flareMatR = flareMatL.clone();
 
-    this.leftFlare = new THREE.Sprite(flareMatL);
-    this.rightFlare = new THREE.Sprite(flareMatR);
-    this.leftFlare.scale.set(0.3, 0.3, 1);
-    this.rightFlare.scale.set(0.3, 0.3, 1);
-    this.scene.add(this.leftFlare);
-    this.scene.add(this.rightFlare);
+    this.firePoints = new THREE.Points(this.fireGeometry, this.fireMaterial);
+    this.firePoints.frustumCulled = false;
+    this.scene.add(this.firePoints);
+
+    for (let i = 0; i < TireEffectsManager.MAX_FIRE_PARTICLES; i++) {
+      this.fireParticles.push({
+        active: false,
+        pos: new THREE.Vector3(),
+        vel: new THREE.Vector3(),
+        age: 0,
+        maxAge: 0.35,
+        startSize: 0.25,
+        endSize: 0.05,
+      });
+      this.firePositions[i * 3 + 1] = -999;
+      this.fireSizes[i] = 0;
+      this.fireAlphas[i] = 0;
+    }
+    this.fireGeometry.attributes.position.needsUpdate = true;
+    this.fireGeometry.attributes.size.needsUpdate = true;
+    this.fireGeometry.attributes.alpha.needsUpdate = true;
+
+    // --- Create Ground Fire Burn Streaks InstancedMesh ---
+    this.groundFireTexture = this.createGroundFireTexture();
+    const groundFireGeo = new THREE.PlaneGeometry(0.38, 1.0);
+    groundFireGeo.rotateX(-Math.PI / 2);
+
+    this.groundFireOpacityAttr = new THREE.InstancedBufferAttribute(this.groundFireOpacities, 1);
+    this.groundFireOpacityAttr.setUsage(THREE.DynamicDrawUsage);
+    groundFireGeo.setAttribute('instanceOpacity', this.groundFireOpacityAttr);
+
+    const groundFireMat = new THREE.MeshBasicMaterial({
+      map: this.groundFireTexture,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2.0,
+      polygonOffsetUnits: -2.0,
+    });
+
+    groundFireMat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          attribute float instanceOpacity;
+          varying float vInstanceOpacity;`
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          vInstanceOpacity = instanceOpacity;`
+        );
+
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+          varying float vInstanceOpacity;`
+        )
+        .replace(
+          '#include <dithering_fragment>',
+          `#include <dithering_fragment>
+          gl_FragColor.a *= vInstanceOpacity;`
+        );
+    };
+
+    this.groundFireMesh = new THREE.InstancedMesh(
+      groundFireGeo,
+      groundFireMat,
+      TireEffectsManager.MAX_GROUND_FIRE
+    );
+    this.groundFireMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+    for (let i = 0; i < TireEffectsManager.MAX_GROUND_FIRE; i++) {
+      this.groundFireMesh.setMatrixAt(i, offscreenMat);
+      this.groundFireOpacities[i] = 0.0;
+      this.groundFireSegments.push({
+        active: false,
+        position: new THREE.Vector3(),
+        heading: 0,
+        age: 0,
+        maxAge: 0.9,
+        initialAlpha: 0.9,
+      });
+    }
+    this.groundFireMesh.instanceMatrix.needsUpdate = true;
+    this.groundFireOpacityAttr.needsUpdate = true;
+    this.scene.add(this.groundFireMesh);
+
+    // --- Dynamic Point Light for Nitro Fire Glow ---
+    this.fireLight = new THREE.PointLight(0xff6611, 0, 9.0, 2.0);
+    this.scene.add(this.fireLight);
   }
 
   // Create high-resolution procedural tire mark texture with realistic tread sipes, shoulder bands and rubber grain
@@ -235,65 +385,20 @@ export class TireEffectsManager {
     return texture;
   }
 
-  // Create a soft Gaussian-blurred neon light ribbon texture
-  private createTrailTexture(): THREE.Texture {
-    const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 128;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.clearRect(0, 0, 128, 128);
-
-      // Vertical Gaussian blur glow gradient (Y = 0 to 128)
-      // Top and bottom edges dissolve to 0 alpha, creating an ethereal blurred light ribbon
-      const grad = ctx.createLinearGradient(0, 0, 0, 128);
-      grad.addColorStop(0.0, 'rgba(255, 255, 255, 0.0)');
-      grad.addColorStop(0.12, 'rgba(255, 255, 255, 0.06)');
-      grad.addColorStop(0.26, 'rgba(255, 255, 255, 0.28)');
-      grad.addColorStop(0.42, 'rgba(255, 255, 255, 0.75)');
-      grad.addColorStop(0.50, 'rgba(255, 255, 255, 1.0)');
-      grad.addColorStop(0.58, 'rgba(255, 255, 255, 0.75)');
-      grad.addColorStop(0.74, 'rgba(255, 255, 255, 0.28)');
-      grad.addColorStop(0.88, 'rgba(255, 255, 255, 0.06)');
-      grad.addColorStop(1.0, 'rgba(255, 255, 255, 0.0)');
-
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, 128, 128);
-
-      // Secondary diffuse blur layer for extra soft atmospheric bloom
-      const diffuseGrad = ctx.createLinearGradient(0, 0, 0, 128);
-      diffuseGrad.addColorStop(0.0, 'rgba(255, 255, 255, 0.0)');
-      diffuseGrad.addColorStop(0.35, 'rgba(255, 255, 255, 0.16)');
-      diffuseGrad.addColorStop(0.50, 'rgba(255, 255, 255, 0.38)');
-      diffuseGrad.addColorStop(0.65, 'rgba(255, 255, 255, 0.16)');
-      diffuseGrad.addColorStop(1.0, 'rgba(255, 255, 255, 0.0)');
-
-      ctx.fillStyle = diffuseGrad;
-      ctx.fillRect(0, 0, 128, 128);
-    }
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.generateMipmaps = true;
-    texture.needsUpdate = true;
-    return texture;
-  }
-
-  // Create soft radial Gaussian flare texture for taillight lens glow
-  private createFlareTexture(): THREE.Texture {
+  // Procedural soft glowing fire ball particle texture
+  private createFireTexture(): THREE.Texture {
     const canvas = document.createElement('canvas');
     canvas.width = 64;
     canvas.height = 64;
     const ctx = canvas.getContext('2d');
     if (ctx) {
+      ctx.clearRect(0, 0, 64, 64);
       const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 31);
       grad.addColorStop(0.0, 'rgba(255, 255, 255, 1.0)');
-      grad.addColorStop(0.18, 'rgba(255, 230, 240, 0.75)');
-      grad.addColorStop(0.42, 'rgba(255, 150, 180, 0.32)');
-      grad.addColorStop(0.70, 'rgba(255, 80, 120, 0.08)');
-      grad.addColorStop(1.0, 'rgba(255, 0, 50, 0.0)');
+      grad.addColorStop(0.18, 'rgba(255, 230, 110, 0.95)');
+      grad.addColorStop(0.42, 'rgba(255, 130, 25, 0.8)');
+      grad.addColorStop(0.72, 'rgba(230, 45, 10, 0.35)');
+      grad.addColorStop(1.0, 'rgba(180, 10, 0, 0.0)');
 
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, 64, 64);
@@ -305,43 +410,97 @@ export class TireEffectsManager {
     return texture;
   }
 
-  // Build a dynamic BufferGeometry ribbon mesh with pre-indexed triangle strips
-  private createRibbonMesh(): THREE.Mesh {
-    const maxPoints = TireEffectsManager.MAX_TRAIL_POINTS;
-    const geo = new THREE.BufferGeometry();
+  // Procedural flaming asphalt burn streak texture
+  private createGroundFireTexture(): THREE.Texture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.clearRect(0, 0, 64, 128);
 
-    const posArray = new Float32Array(maxPoints * 2 * 3);
-    const uvArray = new Float32Array(maxPoints * 2 * 2);
-    const colorArray = new Float32Array(maxPoints * 2 * 3);
+      // Core fire ribbon gradient from center outwards
+      const grad = ctx.createLinearGradient(0, 0, 64, 0);
+      grad.addColorStop(0.0, 'rgba(220, 30, 0, 0.0)');
+      grad.addColorStop(0.2, 'rgba(255, 70, 10, 0.45)');
+      grad.addColorStop(0.5, 'rgba(255, 220, 120, 0.95)');
+      grad.addColorStop(0.8, 'rgba(255, 70, 10, 0.45)');
+      grad.addColorStop(1.0, 'rgba(220, 30, 0, 0.0)');
 
-    geo.setAttribute('position', new THREE.BufferAttribute(posArray, 3).setUsage(THREE.DynamicDrawUsage));
-    geo.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2).setUsage(THREE.DynamicDrawUsage));
-    geo.setAttribute('color', new THREE.BufferAttribute(colorArray, 3).setUsage(THREE.DynamicDrawUsage));
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 64, 128);
 
-    // Pre-build index buffer for (maxPoints - 1) quads
-    const indices: number[] = [];
-    for (let i = 0; i < maxPoints - 1; i++) {
-      const p0 = i * 2;
-      const p1 = i * 2 + 1;
-      const p2 = (i + 1) * 2;
-      const p3 = (i + 1) * 2 + 1;
-      indices.push(p0, p1, p2, p2, p1, p3);
+      // Add turbulent flame streaks
+      ctx.fillStyle = 'rgba(255, 255, 200, 0.7)';
+      for (let i = 0; i < 8; i++) {
+        const x = 24 + Math.random() * 16;
+        const y = Math.random() * 100;
+        const h = 15 + Math.random() * 20;
+        ctx.fillRect(x, y, 3, h);
+      }
     }
-    geo.setIndex(new THREE.Uint16BufferAttribute(indices, 1));
-    geo.setDrawRange(0, 0);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.needsUpdate = true;
+    return texture;
+  }
 
-    const mat = new THREE.MeshBasicMaterial({
-      map: this.trailTexture,
-      vertexColors: true,
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
+  // Spawn a high-speed fire exhaust particle
+  private spawnFireParticle(origin: THREE.Vector3, exhaustDir: THREE.Vector3, carSpeedKmh: number) {
+    const idx = this.fireNextIndex;
+    this.fireNextIndex = (this.fireNextIndex + 1) % TireEffectsManager.MAX_FIRE_PARTICLES;
 
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.frustumCulled = false;
-    return mesh;
+    const p = this.fireParticles[idx];
+    p.active = true;
+    p.pos.copy(origin);
+    // Slight jitter in emitter origin
+    p.pos.x += (Math.random() - 0.5) * 0.08;
+    p.pos.y += (Math.random() - 0.5) * 0.06;
+    p.pos.z += (Math.random() - 0.5) * 0.08;
+
+    p.age = 0;
+    p.maxAge = 0.22 + Math.random() * 0.16; // quick 220-380ms fire trail
+    p.startSize = 0.24 + Math.random() * 0.12;
+    p.endSize = 0.55 + Math.random() * 0.25;
+
+    // Velocity: shooting backward with high thrust + turbulent cone spread
+    const speedBoost = Math.max(12.0, carSpeedKmh * 0.25);
+    p.vel.copy(exhaustDir).multiplyScalar(speedBoost + (Math.random() - 0.5) * 4.0);
+    p.vel.x += (Math.random() - 0.5) * 1.8;
+    p.vel.y += 0.4 + Math.random() * 1.2;
+    p.vel.z += (Math.random() - 0.5) * 1.8;
+  }
+
+  // Add an ignited ground burn segment on the road behind tires
+  private addGroundFireSegment(p0: THREE.Vector3, p1: THREE.Vector3, intensity: number = 0.95) {
+    const dx = p1.x - p0.x;
+    const dz = p1.z - p0.z;
+    const len = Math.hypot(dx, dz);
+    if (len < 0.05) return;
+
+    const idx = this.groundFireNextIndex;
+    this.groundFireNextIndex = (this.groundFireNextIndex + 1) % TireEffectsManager.MAX_GROUND_FIRE;
+
+    const seg = this.groundFireSegments[idx];
+    seg.active = true;
+    seg.position.set((p0.x + p1.x) * 0.5, 0.026, (p0.z + p1.z) * 0.5);
+    seg.heading = Math.atan2(dx, dz);
+    seg.age = 0;
+    seg.maxAge = 0.85;
+    seg.initialAlpha = Math.min(1.0, Math.max(0.4, intensity));
+
+    this.dummy.position.copy(seg.position);
+    this.dummy.rotation.set(0, seg.heading, 0);
+    this.dummy.scale.set(1.0, 1.0, len * 1.1);
+    this.dummy.updateMatrix();
+
+    this.groundFireMesh.setMatrixAt(idx, this.dummy.matrix);
+    this.groundFireOpacities[idx] = seg.initialAlpha;
+    this.groundFireMesh.instanceMatrix.needsUpdate = true;
+    this.groundFireOpacityAttr.needsUpdate = true;
   }
 
   // Add a continuous tire mark quad connecting p0 and p1 on the road
@@ -370,48 +529,6 @@ export class TireEffectsManager {
 
     this.skidMesh.setMatrixAt(idx, this.dummy.matrix);
     this.skidOpacities[idx] = seg.initialAlpha;
-  }
-
-  // Update a trail points list with a new anchor point
-  private updateTrailPoints(
-    points: TrailPoint[],
-    worldPos: THREE.Vector3,
-    color: THREE.Color,
-    width: number,
-    maxAge: number
-  ) {
-    if (points.length === 0) {
-      points.push({
-        pos: worldPos.clone(),
-        age: 0,
-        maxAge,
-        color: color.clone(),
-        width,
-      });
-      return;
-    }
-
-    // Keep the leading edge firmly pinned to the taillight
-    points[0].pos.copy(worldPos);
-    points[0].color.copy(color);
-    points[0].width = width;
-    points[0].maxAge = maxAge;
-
-    const distToPrev = points[1] ? points[0].pos.distanceTo(points[1].pos) : 999;
-    // Insert new point along path every 16 cm
-    if (distToPrev >= 0.16) {
-      points.unshift({
-        pos: worldPos.clone(),
-        age: 0,
-        maxAge,
-        color: color.clone(),
-        width,
-      });
-
-      if (points.length > TireEffectsManager.MAX_TRAIL_POINTS) {
-        points.pop();
-      }
-    }
   }
 
   // Emit light trails and road skid marks behind vehicle
@@ -492,153 +609,47 @@ export class TireEffectsManager {
       this.skidOpacityAttr.needsUpdate = true;
     }
 
-    // Taillight emitter positions for Light Trails
-    const halfWidth = trackWidth * 0.44;
-    const rearZ = -wheelBase * 1.05;
-    const lightY = 0.52;
+    // 2. Nitro Boost Dual Exhaust Fire Trails & Pavement Burn Streaks
+    if (isBoosting) {
+      const exhaustSpacing = trackWidth * 0.28;
+      const exhaustRearZ = -wheelBase * 1.06;
+      const exhaustY = 0.28;
 
-    const leftLightWorld = carRoot.localToWorld(new THREE.Vector3(-halfWidth, lightY, rearZ));
-    const rightLightWorld = carRoot.localToWorld(new THREE.Vector3(halfWidth, lightY, rearZ));
+      const leftExhaust = carRoot.localToWorld(new THREE.Vector3(-exhaustSpacing, exhaustY, exhaustRearZ));
+      const rightExhaust = carRoot.localToWorld(new THREE.Vector3(exhaustSpacing, exhaustY, exhaustRearZ));
+      const rearCenter = carRoot.localToWorld(new THREE.Vector3(0, exhaustY + 0.08, exhaustRearZ));
 
-    // 2. Blurred Small Light Trail (Active while vehicle is moving or boosting)
-    if (speed > 0.8 || isBoosting) {
-      let trailColor: THREE.Color;
-      let trailWidth: number;
-      let trailMaxAge: number;
-      let flareOpacity: number;
+      // Exhaust blast fires straight back relative to car orientation
+      const exhaustDir = new THREE.Vector3(0, 0, -1).applyQuaternion(carRoot.quaternion).normalize();
 
-      if (isBoosting) {
-        // Hyperdrive Electric Cyan Plasma Stream
-        trailColor = new THREE.Color(0x00ffff);
-        trailWidth = 0.38;
-        trailMaxAge = 1.1;
-        flareOpacity = 0.95;
-      } else if (isSlipping) {
-        // Drift / Slide: Neon Pink-Magenta Stream
-        trailColor = new THREE.Color(0xff007f);
-        trailWidth = 0.35;
-        trailMaxAge = 0.95;
-        flareOpacity = 0.9;
-      } else if (isBraking) {
-        // Hard Braking: Glowing Orange-Red Stream
-        trailColor = new THREE.Color(0xff3300);
-        trailWidth = 0.32;
-        trailMaxAge = 0.85;
-        flareOpacity = 0.9;
-      } else {
-        // Standard Cruising: Smooth Neon Cyan Stream
-        const speedRatio = Math.min(speed / 90.0, 1.0);
-        trailColor = new THREE.Color(0x00e5ff);
-        trailWidth = 0.28 + speedRatio * 0.08;
-        trailMaxAge = 0.65 + speedRatio * 0.35;
-        flareOpacity = 0.55 + speedRatio * 0.35;
+      const particlesPerExhaust = speed > 40 ? 4 : 3;
+      for (let p = 0; p < particlesPerExhaust; p++) {
+        this.spawnFireParticle(leftExhaust, exhaustDir, speed);
+        this.spawnFireParticle(rightExhaust, exhaustDir, speed);
       }
 
-      this.updateTrailPoints(this.leftPoints, leftLightWorld, trailColor, trailWidth, trailMaxAge);
-      this.updateTrailPoints(this.rightPoints, rightLightWorld, trailColor, trailWidth, trailMaxAge);
+      // Lay down fiery ground burn marks under rear wheels
+      if (this.hasLastRL) {
+        this.addGroundFireSegment(this.lastPosRL, wheelPositions.rl, 0.95);
+      }
+      if (this.hasLastRR) {
+        this.addGroundFireSegment(this.lastPosRR, wheelPositions.rr, 0.95);
+      }
 
-      // Update Taillight lens flares (small and subtle)
-      this.leftFlare.position.copy(leftLightWorld);
-      this.rightFlare.position.copy(rightLightWorld);
-      (this.leftFlare.material as THREE.SpriteMaterial).color.copy(trailColor);
-      (this.rightFlare.material as THREE.SpriteMaterial).color.copy(trailColor);
-      (this.leftFlare.material as THREE.SpriteMaterial).opacity = flareOpacity;
-      (this.rightFlare.material as THREE.SpriteMaterial).opacity = flareOpacity;
-      const flareSize = trailWidth * 0.75;
-      this.leftFlare.scale.set(flareSize, flareSize, 1);
-      this.rightFlare.scale.set(flareSize, flareSize, 1);
+      // Dynamic flame illumination flickering
+      this.fireLight.position.copy(rearCenter);
+      this.fireLightPulse += 0.25;
+      this.fireLight.intensity = 3.5 + Math.sin(this.fireLightPulse * 16.0) * 1.0 + (Math.random() - 0.5) * 0.8;
     } else {
-      (this.leftFlare.material as THREE.SpriteMaterial).opacity = 0;
-      (this.rightFlare.material as THREE.SpriteMaterial).opacity = 0;
+      this.fireLight.intensity = 0;
     }
   }
 
-  // Rebuild blurred, small light ribbon mesh buffers
-  private renderRibbon(mesh: THREE.Mesh, points: TrailPoint[]) {
-    const M = points.length;
-    if (M < 2) {
-      mesh.geometry.setDrawRange(0, 0);
-      return;
-    }
-
-    const posAttr = mesh.geometry.attributes.position as THREE.BufferAttribute;
-    const uvAttr = mesh.geometry.attributes.uv as THREE.BufferAttribute;
-    const colorAttr = mesh.geometry.attributes.color as THREE.BufferAttribute;
-
-    const posArr = posAttr.array as Float32Array;
-    const uvArr = uvAttr.array as Float32Array;
-    const colArr = colorAttr.array as Float32Array;
-
-    for (let i = 0; i < M; i++) {
-      const pt = points[i];
-      const p = pt.pos;
-
-      const progress = pt.age / pt.maxAge;
-      // Soft exponential fadeout along trail length
-      const alpha = Math.max(0, Math.pow(1.0 - progress, 1.4));
-
-      // Small height: Low-profile glowing beam hugging car rear and ground
-      const beamTopY = Math.max(0.22, Math.min(0.28, p.y * 0.5 + 0.04));
-      const beamBotY = 0.035;
-
-      // Top vertex: dissolves softly into transparency via Gaussian V-coord
-      const idx0 = i * 2;
-      posArr[idx0 * 3] = p.x;
-      posArr[idx0 * 3 + 1] = beamTopY;
-      posArr[idx0 * 3 + 2] = p.z;
-
-      uvArr[idx0 * 2] = progress * 2.0;
-      uvArr[idx0 * 2 + 1] = 0.0; // V=0 dissolves softly in Gaussian blur texture
-
-      colArr[idx0 * 3] = pt.color.r * alpha;
-      colArr[idx0 * 3 + 1] = pt.color.g * alpha;
-      colArr[idx0 * 3 + 2] = pt.color.b * alpha;
-
-      // Bottom vertex: ground contact line dissolving softly
-      const idx1 = i * 2 + 1;
-      posArr[idx1 * 3] = p.x;
-      posArr[idx1 * 3 + 1] = beamBotY;
-      posArr[idx1 * 3 + 2] = p.z;
-
-      uvArr[idx1 * 2] = progress * 2.0;
-      uvArr[idx1 * 2 + 1] = 1.0; // V=1 dissolves softly in Gaussian blur texture
-
-      colArr[idx1 * 3] = pt.color.r * alpha;
-      colArr[idx1 * 3 + 1] = pt.color.g * alpha;
-      colArr[idx1 * 3 + 2] = pt.color.b * alpha;
-    }
-
-    posAttr.needsUpdate = true;
-    uvAttr.needsUpdate = true;
-    colorAttr.needsUpdate = true;
-    mesh.geometry.setDrawRange(0, (M - 1) * 6);
-  }
-
-  // Update light trails and skid marks aging
+  // Update skid marks aging, ground fire burn marks, and fire particles
   public update(dt: number, _camera?: THREE.Camera) {
     const delta = Math.min(dt, 0.08);
 
-    // 1. Age and trim light trail points
-    for (let i = this.leftPoints.length - 1; i >= 1; i--) {
-      this.leftPoints[i].age += delta;
-      if (this.leftPoints[i].age >= this.leftPoints[i].maxAge) {
-        this.leftPoints.splice(i);
-        break;
-      }
-    }
-    for (let i = this.rightPoints.length - 1; i >= 1; i--) {
-      this.rightPoints[i].age += delta;
-      if (this.rightPoints[i].age >= this.rightPoints[i].maxAge) {
-        this.rightPoints.splice(i);
-        break;
-      }
-    }
-
-    // 2. Render dynamic Tron light wall meshes
-    this.renderRibbon(this.leftTrailMesh, this.leftPoints);
-    this.renderRibbon(this.rightTrailMesh, this.rightPoints);
-
-    // 3. Skid Marks Aging with Smooth Non-Linear Rubber Fading
+    // 1. Skid Marks Aging with Smooth Non-Linear Rubber Fading
     let skidMatrixChanged = false;
     let skidOpacityChanged = false;
 
@@ -670,29 +681,120 @@ export class TireEffectsManager {
     if (skidOpacityChanged) {
       this.skidOpacityAttr.needsUpdate = true;
     }
+
+    // 2. Ground Fire Streaks Aging & Fading
+    let groundFireMatrixChanged = false;
+    let groundFireOpacityChanged = false;
+
+    for (let i = 0; i < TireEffectsManager.MAX_GROUND_FIRE; i++) {
+      const seg = this.groundFireSegments[i];
+      if (!seg.active) continue;
+
+      seg.age += delta;
+      if (seg.age >= seg.maxAge) {
+        seg.active = false;
+        this.groundFireOpacities[i] = 0;
+        this.dummy.position.set(0, -999, 0);
+        this.dummy.scale.set(0, 0, 0);
+        this.dummy.updateMatrix();
+        this.groundFireMesh.setMatrixAt(i, this.dummy.matrix);
+        groundFireMatrixChanged = true;
+        groundFireOpacityChanged = true;
+      } else {
+        const lifeRatio = seg.age / seg.maxAge;
+        const fade = Math.pow(1.0 - lifeRatio, 1.6);
+        this.groundFireOpacities[i] = seg.initialAlpha * fade;
+        groundFireOpacityChanged = true;
+      }
+    }
+
+    if (groundFireMatrixChanged) {
+      this.groundFireMesh.instanceMatrix.needsUpdate = true;
+    }
+    if (groundFireOpacityChanged) {
+      this.groundFireOpacityAttr.needsUpdate = true;
+    }
+
+    // 3. Fire Particles Motion & Blazing Color Gradient Simulation
+    let hasActiveParticles = false;
+    for (let i = 0; i < TireEffectsManager.MAX_FIRE_PARTICLES; i++) {
+      const p = this.fireParticles[i];
+      const i3 = i * 3;
+
+      if (!p.active) {
+        this.fireSizes[i] = 0;
+        this.fireAlphas[i] = 0;
+        continue;
+      }
+
+      hasActiveParticles = true;
+      p.age += delta;
+      if (p.age >= p.maxAge) {
+        p.active = false;
+        this.fireSizes[i] = 0;
+        this.fireAlphas[i] = 0;
+        this.firePositions[i3 + 1] = -999;
+        continue;
+      }
+
+      // Physics: advection + turbulence + buoyant upward rise
+      p.pos.addScaledVector(p.vel, delta);
+      p.vel.y += 2.2 * delta; // flames rise
+      p.vel.multiplyScalar(0.92); // air drag slows flames down
+
+      this.firePositions[i3] = p.pos.x;
+      this.firePositions[i3 + 1] = p.pos.y;
+      this.firePositions[i3 + 2] = p.pos.z;
+
+      const t = p.age / p.maxAge;
+      // Flame expands outward as it travels
+      this.fireSizes[i] = p.startSize + (p.endSize - p.startSize) * Math.sin(t * Math.PI * 0.5);
+      this.fireAlphas[i] = Math.pow(1.0 - t, 1.2);
+
+      // Blazing Fire Color Progression: White-Yellow Core -> Hot Orange -> Crimson Red -> Smoke
+      if (t < 0.25) {
+        const s = t / 0.25;
+        this.fireColors[i3] = 1.0;
+        this.fireColors[i3 + 1] = 1.0 - s * 0.25;
+        this.fireColors[i3 + 2] = 0.9 - s * 0.75;
+      } else if (t < 0.65) {
+        const s = (t - 0.25) / 0.4;
+        this.fireColors[i3] = 1.0;
+        this.fireColors[i3 + 1] = 0.75 - s * 0.50;
+        this.fireColors[i3 + 2] = 0.15 - s * 0.13;
+      } else {
+        const s = (t - 0.65) / 0.35;
+        this.fireColors[i3] = 1.0 - s * 0.55;
+        this.fireColors[i3 + 1] = 0.25 - s * 0.17;
+        this.fireColors[i3 + 2] = 0.02 - s * 0.01;
+      }
+    }
+
+    if (hasActiveParticles) {
+      this.fireGeometry.attributes.position.needsUpdate = true;
+      this.fireGeometry.attributes.color.needsUpdate = true;
+      this.fireGeometry.attributes.size.needsUpdate = true;
+      this.fireGeometry.attributes.alpha.needsUpdate = true;
+    }
   }
 
   public dispose() {
     this.scene.remove(this.skidMesh);
-    this.scene.remove(this.leftTrailMesh);
-    this.scene.remove(this.rightTrailMesh);
-    this.scene.remove(this.leftFlare);
-    this.scene.remove(this.rightFlare);
+    this.scene.remove(this.groundFireMesh);
+    this.scene.remove(this.firePoints);
+    this.scene.remove(this.fireLight);
 
     this.skidMesh.geometry.dispose();
     (this.skidMesh.material as THREE.Material).dispose();
 
-    this.leftTrailMesh.geometry.dispose();
-    (this.leftTrailMesh.material as THREE.Material).dispose();
+    this.groundFireMesh.geometry.dispose();
+    (this.groundFireMesh.material as THREE.Material).dispose();
 
-    this.rightTrailMesh.geometry.dispose();
-    (this.rightTrailMesh.material as THREE.Material).dispose();
-
-    this.leftFlare.material.dispose();
-    this.rightFlare.material.dispose();
+    this.fireGeometry.dispose();
+    this.fireMaterial.dispose();
 
     this.tireMarkTexture.dispose();
-    this.trailTexture.dispose();
-    this.flareTexture.dispose();
+    this.fireTexture.dispose();
+    this.groundFireTexture.dispose();
   }
 }

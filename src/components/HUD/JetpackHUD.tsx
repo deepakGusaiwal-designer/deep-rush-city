@@ -4,12 +4,16 @@ import { Rocket, Fuel, ArrowUp, ArrowDown, Zap } from 'lucide-react';
 
 /** Fuel / altitude readout shown while the jetpack is equipped. */
 export const JetpackHUD: React.FC = () => {
-  const telemetry = useGameStore((s) => s.telemetry);
-  if (!telemetry.jetpackActive || telemetry.playerMode === 'driving') return null;
+  const jetpackActive = useGameStore((s) => s.telemetry.jetpackActive);
+  const playerMode = useGameStore((s) => s.telemetry.playerMode);
+  const jetpackFuel = useGameStore((s) => s.telemetry.jetpackFuel);
+  const altitude = useGameStore((s) => s.telemetry.altitude);
 
-  const fuel = Math.max(0, Math.min(100, telemetry.jetpackFuel));
+  if (!jetpackActive || playerMode === 'driving') return null;
+
+  const fuel = Math.max(0, Math.min(100, jetpackFuel));
   const low = fuel < 20;
-  const alt = Math.round(telemetry.altitude);
+  const alt = Math.round(altitude);
 
   return (
     <div className="flex flex-col items-end pointer-events-none select-none">

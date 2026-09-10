@@ -317,14 +317,65 @@ class AudioManager {
     }
   }
 
-  stopEngine() {
-    if (!this.ctx || !this.engineMasterGain) return;
+  public stopVehicleAudio() {
+    if (!this.ctx) return;
     this.isEngineRunning = false;
+    this.isDriftingActive = false;
     const now = this.ctx.currentTime;
-    this.engineMasterGain.gain.setTargetAtTime(0.0, now, 0.22);
-    this.turboGain?.gain.setTargetAtTime(0.0, now, 0.08);
-    this.nitroGain?.gain.setTargetAtTime(0.0, now, 0.08);
-    this.nitroSubGain?.gain.setTargetAtTime(0.0, now, 0.08);
+
+    // 1. Immediately cut master engine volume
+    if (this.engineMasterGain) {
+      this.engineMasterGain.gain.cancelScheduledValues(now);
+      this.engineMasterGain.gain.setValueAtTime(this.engineMasterGain.gain.value, now);
+      this.engineMasterGain.gain.linearRampToValueAtTime(0.0, now + 0.05);
+    }
+    // 2. Immediately cut turbo & nitro gains
+    if (this.turboGain) {
+      this.turboGain.gain.cancelScheduledValues(now);
+      this.turboGain.gain.setValueAtTime(this.turboGain.gain.value, now);
+      this.turboGain.gain.linearRampToValueAtTime(0.0, now + 0.05);
+    }
+    if (this.nitroGain) {
+      this.nitroGain.gain.cancelScheduledValues(now);
+      this.nitroGain.gain.setValueAtTime(this.nitroGain.gain.value, now);
+      this.nitroGain.gain.linearRampToValueAtTime(0.0, now + 0.05);
+    }
+    if (this.nitroSubGain) {
+      this.nitroSubGain.gain.cancelScheduledValues(now);
+      this.nitroSubGain.gain.setValueAtTime(this.nitroSubGain.gain.value, now);
+      this.nitroSubGain.gain.linearRampToValueAtTime(0.0, now + 0.05);
+    }
+    // 3. Immediately silence tire screech / drift loop
+    if (this.driftGain) {
+      this.driftGain.gain.cancelScheduledValues(now);
+      this.driftGain.gain.setValueAtTime(this.driftGain.gain.value, now);
+      this.driftGain.gain.linearRampToValueAtTime(0.0, now + 0.05);
+    }
+    // 4. Immediately silence horn
+    if (this.isHornPlaying || (this.hornGain && this.hornGain.gain.value > 0.001)) {
+      this.isHornPlaying = false;
+      if (this.hornGain) {
+        this.hornGain.gain.cancelScheduledValues(now);
+        this.hornGain.gain.setValueAtTime(this.hornGain.gain.value, now);
+        this.hornGain.gain.linearRampToValueAtTime(0.0, now + 0.05);
+      }
+      setTimeout(() => {
+        try {
+          this.hornOsc1?.stop();
+          this.hornOsc2?.stop();
+          this.hornOsc1?.disconnect();
+          this.hornOsc2?.disconnect();
+          this.hornOsc1 = null;
+          this.hornOsc2 = null;
+        } catch {
+          // ignore
+        }
+      }, 60);
+    }
+  }
+
+  stopEngine() {
+    this.stopVehicleAudio();
   }
 
   /**
@@ -334,11 +385,23 @@ class AudioManager {
     speedKmh: number,
     isAccelerating: boolean,
     isBoosting: boolean = false,
-    vehicleType?: string
+    vehicleType?: string,
+    physicalRpm?: number,
+    physicalGear?: number | string
   ) {
     if (!this.ctx || !this.engineMasterGain || this.isMuted || !this.isEngineRunning) {
+      const now = this.ctx ? this.ctx.currentTime : 0;
       if (this.engineMasterGain && (!this.isEngineRunning || this.isMuted)) {
-        this.engineMasterGain.gain.setTargetAtTime(0, this.ctx ? this.ctx.currentTime : 0, 0.08);
+        this.engineMasterGain.gain.setTargetAtTime(0, now, 0.05);
+      }
+      if (this.turboGain && (!this.isEngineRunning || this.isMuted)) {
+        this.turboGain.gain.setTargetAtTime(0, now, 0.05);
+      }
+      if (this.nitroGain && (!this.isEngineRunning || this.isMuted)) {
+        this.nitroGain.gain.setTargetAtTime(0, now, 0.05);
+      }
+      if (this.nitroSubGain && (!this.isEngineRunning || this.isMuted)) {
+        this.nitroSubGain.gain.setTargetAtTime(0, now, 0.05);
       }
       return;
     }
@@ -349,52 +412,64 @@ class AudioManager {
     const absSpeed = Math.abs(speedKmh);
     const isElectric = this.currentVehicleType === 'Futuristic_Car_1';
 
-    // 1. Transmission Simulation (1st through 5th gear)
-    let newGear = 1;
-    if (absSpeed < 32) newGear = 1;
-    else if (absSpeed < 64) newGear = 2;
-    else if (absSpeed < 100) newGear = 3;
-    else if (absSpeed < 140) newGear = 4;
-    else newGear = 5;
+    // 1. Transmission & Gear Tracking
+    if (physicalGear !== undefined) {
+      const parsedGear = typeof physicalGear === 'number' ? physicalGear : parseInt(physicalGear, 10) || 1;
+      if (!isElectric && parsedGear > this.currentGear && this.currentGear > 0) {
+        this.isShifting = true;
+        this.shiftTimer = now + 0.085;
+      }
+      this.currentGear = parsedGear > 0 ? parsedGear : 1;
+    } else {
+      let newGear = 1;
+      if (absSpeed < 32) newGear = 1;
+      else if (absSpeed < 64) newGear = 2;
+      else if (absSpeed < 100) newGear = 3;
+      else if (absSpeed < 140) newGear = 4;
+      else newGear = 5;
 
-    if (!isElectric && newGear > this.currentGear) {
-      // Upshift clutch dip: audible momentary drop in RPM and engine load
-      this.isShifting = true;
-      this.shiftTimer = now + 0.1;
+      if (!isElectric && newGear > this.currentGear) {
+        this.isShifting = true;
+        this.shiftTimer = now + 0.1;
+      }
+      this.currentGear = newGear;
     }
-    this.currentGear = newGear;
 
     if (this.isShifting && now > this.shiftTimer) {
       this.isShifting = false;
     }
 
-    // 2. Virtual RPM calculation
-    let targetRpm = 1000;
-    if (isElectric) {
-      // Hypercar linear power band
-      targetRpm = 1200 + absSpeed * 32 + (isAccelerating ? 600 : 0) + (isBoosting ? 1400 : 0);
+    // 2. RPM calculation (honors true physical engine RPM when available)
+    if (physicalRpm !== undefined) {
+      this.currentRpm += (physicalRpm - this.currentRpm) * 0.28;
     } else {
-      const gearRanges = [
-        { min: 0, max: 35 },
-        { min: 25, max: 68 },
-        { min: 54, max: 105 },
-        { min: 88, max: 146 },
-        { min: 125, max: 215 },
-      ];
-      const range = gearRanges[this.currentGear - 1] || gearRanges[4];
-      const speedInGear = Math.max(0, Math.min(1, (absSpeed - range.min) / (range.max - range.min)));
-      targetRpm =
-        1100 +
-        speedInGear * 4800 +
-        (isAccelerating ? 700 : 0) +
-        (isBoosting ? 1100 : 0);
+      let targetRpm = 1000;
+      if (isElectric) {
+        // Hypercar linear power band
+        targetRpm = 1200 + absSpeed * 32 + (isAccelerating ? 600 : 0) + (isBoosting ? 1400 : 0);
+      } else {
+        const gearRanges = [
+          { min: 0, max: 35 },
+          { min: 25, max: 68 },
+          { min: 54, max: 105 },
+          { min: 88, max: 146 },
+          { min: 125, max: 215 },
+        ];
+        const range = gearRanges[this.currentGear - 1] || gearRanges[4];
+        const speedInGear = Math.max(0, Math.min(1, (absSpeed - range.min) / (range.max - range.min)));
+        targetRpm =
+          1100 +
+          speedInGear * 4800 +
+          (isAccelerating ? 700 : 0) +
+          (isBoosting ? 1100 : 0);
 
-      if (this.isShifting) {
-        targetRpm *= 0.72; // Clutch dip
+        if (this.isShifting) {
+          targetRpm *= 0.72; // Clutch dip
+        }
       }
+      targetRpm = Math.max(900, Math.min(6800, targetRpm));
+      this.currentRpm += (targetRpm - this.currentRpm) * 0.18;
     }
-    targetRpm = Math.max(900, Math.min(6800, targetRpm));
-    this.currentRpm += (targetRpm - this.currentRpm) * 0.18;
 
     // 3. Exhaust Overrun Backfires & Blow-off Valve on throttle lift-off
     if (this.prevAccelerating && !isAccelerating && now - this.lastThrottleReleaseTime > 0.6) {
@@ -467,7 +542,7 @@ class AudioManager {
   }
 
   // Exhaust burble & crackle pops (*pop-pop-burble*)
-  private triggerExhaustBurble() {
+  public triggerExhaustBurble() {
     if (!this.ctx || this.isMuted) return;
     const now = this.ctx.currentTime;
     const popCount = 2 + Math.floor(Math.random() * 3);
@@ -512,7 +587,7 @@ class AudioManager {
   }
 
   // Wastegate Blow-off Valve flutter (*pssh-stututu*)
-  private triggerBlowOffValve() {
+  public triggerBlowOffValve() {
     if (!this.ctx || this.isMuted) return;
     const now = this.ctx.currentTime;
 
@@ -588,6 +663,13 @@ class AudioManager {
 
   setDrifting(drifting: boolean, slipIntensity: number = 1.0, speedKmh: number = 50) {
     if (!this.ctx || !this.driftGain || !this.driftFilter || this.isMuted) return;
+    if (!this.isEngineRunning) {
+      if (this.driftGain.gain.value > 0.001) {
+        this.driftGain.gain.setTargetAtTime(0.0, this.ctx.currentTime, 0.04);
+      }
+      this.isDriftingActive = false;
+      return;
+    }
     this.isDriftingActive = drifting;
     this.ensureRunning();
 
@@ -766,6 +848,87 @@ class AudioManager {
     noise.start(now);
   }
 
+  // --- Parachute Sound Effects ---
+  playParachuteDeploy() {
+    if (!this.ctx || this.isMuted) return;
+    this.ensureRunning();
+    const now = this.ctx.currentTime;
+
+    // 1. Sharp pilot chute / deployment cord snap
+    const bufferSize = Math.round(this.ctx.sampleRate * 0.25);
+    const buf = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) d[i] = Math.random() * 2 - 1;
+
+    const snap = this.ctx.createBufferSource();
+    snap.buffer = buf;
+    const snapFilter = this.ctx.createBiquadFilter();
+    snapFilter.type = 'highpass';
+    snapFilter.frequency.setValueAtTime(1800, now);
+    const snapGain = this.ctx.createGain();
+    snapGain.gain.setValueAtTime(0.42, now);
+    snapGain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    snap.connect(snapFilter);
+    snapFilter.connect(snapGain);
+    snapGain.connect(this.destination);
+    snap.start(now);
+
+    // 2. Heavy canvas inflation whoosh & air capture
+    const whoosh = this.ctx.createBufferSource();
+    whoosh.buffer = buf;
+    const whooshFilter = this.ctx.createBiquadFilter();
+    whooshFilter.type = 'lowpass';
+    whooshFilter.frequency.setValueAtTime(450, now);
+    whooshFilter.frequency.exponentialRampToValueAtTime(1200, now + 0.16);
+    whooshFilter.frequency.exponentialRampToValueAtTime(320, now + 0.42);
+    const whooshGain = this.ctx.createGain();
+    whooshGain.gain.setValueAtTime(0.01, now);
+    whooshGain.gain.linearRampToValueAtTime(0.38, now + 0.12);
+    whooshGain.gain.exponentialRampToValueAtTime(0.001, now + 0.46);
+    whoosh.connect(whooshFilter);
+    whooshFilter.connect(whooshGain);
+    whooshGain.connect(this.destination);
+    whoosh.start(now);
+
+    // 3. Low aerodynamic jolt thud as canopy catches air
+    const thud = this.ctx.createOscillator();
+    const thudGain = this.ctx.createGain();
+    thud.type = 'sine';
+    thud.frequency.setValueAtTime(95, now + 0.05);
+    thud.frequency.exponentialRampToValueAtTime(32, now + 0.28);
+    thudGain.gain.setValueAtTime(0.26, now + 0.05);
+    thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.30);
+    thud.connect(thudGain);
+    thudGain.connect(this.destination);
+    thud.start(now + 0.05);
+    thud.stop(now + 0.32);
+  }
+
+  playParachuteCut() {
+    if (!this.ctx || this.isMuted) return;
+    this.ensureRunning();
+    const now = this.ctx.currentTime;
+
+    const bufferSize = Math.round(this.ctx.sampleRate * 0.1);
+    const buf = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) d[i] = Math.random() * 2 - 1;
+
+    const cut = this.ctx.createBufferSource();
+    cut.buffer = buf;
+    const cutFilter = this.ctx.createBiquadFilter();
+    cutFilter.type = 'bandpass';
+    cutFilter.frequency.setValueAtTime(2400, now);
+    cutFilter.Q.setValueAtTime(3.0, now);
+    const cutGain = this.ctx.createGain();
+    cutGain.gain.setValueAtTime(0.35, now);
+    cutGain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+    cut.connect(cutFilter);
+    cutFilter.connect(cutGain);
+    cutGain.connect(this.destination);
+    cut.start(now);
+  }
+
   // --- UI Sound Effects ---
   playUiClick() {
     if (!this.ctx || this.isMuted) return;
@@ -797,6 +960,7 @@ class AudioManager {
 
   playHorn(active: boolean) {
     if (!this.ctx || !this.hornGain || this.isMuted) return;
+    if (!this.isEngineRunning && active) return;
     if (this.isHornPlaying === active) return;
     this.isHornPlaying = active;
     this.ensureRunning();

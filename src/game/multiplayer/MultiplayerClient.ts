@@ -29,8 +29,54 @@ export class MultiplayerClient {
   public onInspectVehicleData?: (data: CarMeetInspectData) => void;
   public onConnectionChange?: (connected: boolean, count: number) => void;
 
+  private broadcastChannel: BroadcastChannel | null = null;
+
   constructor() {
     this.playerName = this.loadOrGenerateName();
+    this.playerId = `ply_${Math.random().toString(36).substring(2, 9)}`;
+    this.initBroadcastMesh();
+  }
+
+  private initBroadcastMesh() {
+    if (typeof window === 'undefined' || !('BroadcastChannel' in window)) return;
+    try {
+      this.broadcastChannel = new BroadcastChannel('deep_rush_city_global_mesh');
+      this.broadcastChannel.onmessage = (event) => {
+        const data = event.data;
+        if (!data || data.senderId === this.playerId) return;
+
+        if (data.type === 'player_update' && data.state) {
+          this.onPlayerUpdate?.(data.state);
+        } else if (data.type === 'player_joined') {
+          this.onlineCount = Math.max(2, this.onlineCount + 1);
+          this.onPlayerJoined?.(data.id, data.name);
+          this.onConnectionChange?.(this.isConnected, this.onlineCount);
+        } else if (data.type === 'player_left') {
+          this.onlineCount = Math.max(1, this.onlineCount - 1);
+          this.onPlayerLeft?.(data.id, data.name);
+          this.onConnectionChange?.(this.isConnected, this.onlineCount);
+        } else if (data.type === 'chat_message' && data.msg) {
+          this.onChatMessage?.(data.msg);
+        }
+      };
+
+      // Announce arrival to other local tabs
+      this.broadcastChannel.postMessage({
+        type: 'player_joined',
+        id: this.playerId,
+        name: this.playerName,
+        senderId: this.playerId,
+      });
+
+      window.addEventListener('beforeunload', () => {
+        this.broadcastChannel?.postMessage({
+          type: 'player_left',
+          id: this.playerId,
+          name: this.playerName,
+          senderId: this.playerId,
+        });
+      });
+    } catch (_) {}
   }
 
   private loadOrGenerateName(): string {
@@ -76,17 +122,12 @@ export class MultiplayerClient {
     if (envUrl && envUrl.trim()) return envUrl.trim();
 
     // 3. Fallback based on runtime environment:
+    // Connect to origin serving the game (Works automatically on Vite dev port 3000, LAN IPs, and production deployments)
     if (typeof window !== 'undefined') {
-      const { hostname, protocol } = window.location;
-      // Local development on Vite (default port 3000) -> server is on 3001
-      if (hostname === 'localhost' || hostname === '127.0.0.1') {
-        return `${protocol}//${hostname}:3001`;
-      }
-      // If served directly from Render (*.onrender.com) or custom domain
       return window.location.origin;
     }
 
-    return 'http://localhost:3001';
+    return 'http://localhost:3000';
   }
 
   public setServerUrl(newUrl: string) {
@@ -215,8 +256,6 @@ export class MultiplayerClient {
    * Broadcast local player state at 25 Hz.
    */
   public sendPlayerUpdate(state: Omit<PlayerNetState, 'id' | 'name' | 'ping' | 'time'>) {
-    if (!this.socket || !this.isConnected) return;
-
     const now = performance.now();
     if (now - this.lastSendTime < this.SEND_INTERVAL_MS) {
       return;
@@ -231,12 +270,37 @@ export class MultiplayerClient {
       time: Date.now(),
     };
 
-    this.socket.emit('player_update', packet);
+    if (this.socket && this.isConnected) {
+      this.socket.emit('player_update', packet);
+    }
+
+    if (this.broadcastChannel) {
+      this.broadcastChannel.postMessage({
+        type: 'player_update',
+        senderId: this.playerId,
+        state: packet,
+      });
+    }
   }
 
   public sendChatMessage(text: string) {
-    if (!this.socket || !this.isConnected) return;
-    this.socket.emit('chat_send', text);
+    if (this.socket && this.isConnected) {
+      this.socket.emit('chat_send', text);
+    }
+    if (this.broadcastChannel) {
+      this.broadcastChannel.postMessage({
+        type: 'chat_message',
+        senderId: this.playerId,
+        msg: {
+          id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          senderId: this.playerId,
+          senderName: this.playerName,
+          text,
+          timestamp: Date.now(),
+          isSystem: false,
+        },
+      });
+    }
   }
 
   public requestInspectVehicle(targetPlayerId: string) {
@@ -245,6 +309,16 @@ export class MultiplayerClient {
   }
 
   public disconnect() {
+    if (this.broadcastChannel) {
+      this.broadcastChannel.postMessage({
+        type: 'player_left',
+        id: this.playerId,
+        name: this.playerName,
+        senderId: this.playerId,
+      });
+      this.broadcastChannel.close();
+      this.broadcastChannel = null;
+    }
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;

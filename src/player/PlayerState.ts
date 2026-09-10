@@ -11,4 +11,5 @@ export type CharacterAnimState =
   | 'TUMBLE_RAGDOLL'
   | 'GET_UP'
   | 'ARRESTED'
-  | 'FLY';
+  | 'FLY'
+  | 'PARACHUTE';

@@ -213,6 +213,7 @@ export class VehicleInteraction {
       }
 
       this.activeTargetVehicle = null;
+      this.vehicleController.onDriverEnter();
       onComplete(hijackedId);
       return true;
     }
@@ -221,7 +222,7 @@ export class VehicleInteraction {
   }
 
   // Begin exiting sequence with safe clearance detection
-  public startExitVehicle(colliders: THREE.Box3[]): THREE.Vector3 {
+  public startExitVehicle(colliders: THREE.Box3[], isBailout: boolean = false): THREE.Vector3 {
     const carPos = this.vehicleController.position;
     const heading = this.vehicleController.heading;
     const halfW = this.vehicleController.trackWidth * 0.5;
@@ -273,16 +274,21 @@ export class VehicleInteraction {
 
     this.playerController.setPosition(finalExitPos, heading);
     this.playerCharacter.setVisible(true);
-    this.playerCharacter.update(0.016, 'EXIT_VEHICLE', 0.2);
+    if (!isBailout) {
+      this.playerCharacter.update(0.016, 'EXIT_VEHICLE', 0.2);
+    }
 
     // Car suspension springs upward as driver weight leaves
     this.vehicleController.applyChassisImpulse(-0.04, 0.08);
+    this.vehicleController.onDriverExit();
 
-    audioManager.stopEngine();
+    audioManager.stopVehicleAudio();
     audioManager.playDoorLatch();
-    setTimeout(() => {
-      audioManager.playDoorSlam();
-    }, 240);
+    if (!isBailout) {
+      setTimeout(() => {
+        audioManager.playDoorSlam();
+      }, 240);
+    }
 
     return finalExitPos;
   }

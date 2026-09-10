@@ -185,6 +185,8 @@ export class FollowCamera {
         // Quick bounding distance filter
         if (playerPos.x < b.min.x - 12 || playerPos.x > b.max.x + 12) continue;
         if (playerPos.z < b.min.z - 12 || playerPos.z > b.max.z + 12) continue;
+        // If the player is standing on or near the roof of a tall building, don't clip camera against this building
+        if (playerPos.y > b.max.y - 4.5 && (b.max.y - b.min.y) > 10.0) continue;
 
         if (ray.intersectBox(b, hitPoint)) {
           const d = lookTarget.distanceTo(hitPoint);
@@ -311,7 +313,10 @@ export class FollowCamera {
     carPosition: THREE.Vector3,
     carQuaternion: THREE.Quaternion,
     speedKmh: number,
-    delta: number
+    delta: number,
+    yawRate: number = 0,
+    isDrifting: boolean = false,
+    isBoosting: boolean = false
   ) {
     this.camera.up.set(0, 1, 0);
     const smoothDelta = Math.min(delta, 0.1);
@@ -368,7 +373,7 @@ export class FollowCamera {
       }
 
       // Dynamic FOV speed effect (from 60 up to 74)
-      const targetFov = this.baseFov + Math.min(Math.abs(speedKmh) / 100 * 12, 14);
+      const targetFov = this.baseFov + Math.min((Math.abs(speedKmh) / 100) * 12, 14);
       this.camera.fov += (targetFov - this.camera.fov) * (smoothDelta * 4.0);
       this.camera.updateProjectionMatrix();
 

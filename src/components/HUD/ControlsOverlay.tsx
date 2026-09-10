@@ -57,7 +57,6 @@ const VirtualThumbstick: React.FC<VirtualThumbstickProps> = ({ onMove, onRelease
 
   const onTouchStart = (e: React.TouchEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     if (activeTouchId.current !== null) return;
     const touch = e.changedTouches[0];
     activeTouchId.current = touch.identifier;
@@ -67,7 +66,6 @@ const VirtualThumbstick: React.FC<VirtualThumbstickProps> = ({ onMove, onRelease
 
   const onTouchMove = (e: React.TouchEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
       if (touch.identifier === activeTouchId.current) {
@@ -79,7 +77,6 @@ const VirtualThumbstick: React.FC<VirtualThumbstickProps> = ({ onMove, onRelease
 
   const onTouchEnd = (e: React.TouchEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
       if (touch.identifier === activeTouchId.current) {
@@ -90,11 +87,16 @@ const VirtualThumbstick: React.FC<VirtualThumbstickProps> = ({ onMove, onRelease
         break;
       }
     }
+    if (e.touches.length === 0 && isEngaged) {
+      activeTouchId.current = null;
+      setIsEngaged(false);
+      setKnobPos({ x: 0, y: 0 });
+      onRelease();
+    }
   };
 
   const onTouchCancel = (e: React.TouchEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     for (let i = 0; i < e.changedTouches.length; i++) {
       const touch = e.changedTouches[i];
       if (touch.identifier === activeTouchId.current) {
@@ -104,6 +106,12 @@ const VirtualThumbstick: React.FC<VirtualThumbstickProps> = ({ onMove, onRelease
         onRelease();
         break;
       }
+    }
+    if (e.touches.length === 0 && isEngaged) {
+      activeTouchId.current = null;
+      setIsEngaged(false);
+      setKnobPos({ x: 0, y: 0 });
+      onRelease();
     }
   };
 
@@ -206,7 +214,6 @@ export const TouchActionButton: React.FC<TouchActionButtonProps> = ({
 
   const onTouchStart = (e: React.TouchEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     if (activeTouchId.current !== null) return;
     const touch = e.changedTouches[0];
     activeTouchId.current = touch.identifier;
@@ -217,7 +224,6 @@ export const TouchActionButton: React.FC<TouchActionButtonProps> = ({
 
   const onTouchEnd = (e: React.TouchEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     for (let i = 0; i < e.changedTouches.length; i++) {
       if (e.changedTouches[i].identifier === activeTouchId.current) {
         activeTouchId.current = null;
@@ -227,11 +233,15 @@ export const TouchActionButton: React.FC<TouchActionButtonProps> = ({
         break;
       }
     }
+    if (e.touches.length === 0 && activeTouchId.current !== null) {
+      activeTouchId.current = null;
+      setIsPressed(false);
+      if (action) setControl(action, false);
+    }
   };
 
   const onTouchCancel = (e: React.TouchEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     for (let i = 0; i < e.changedTouches.length; i++) {
       if (e.changedTouches[i].identifier === activeTouchId.current) {
         activeTouchId.current = null;
@@ -239,6 +249,11 @@ export const TouchActionButton: React.FC<TouchActionButtonProps> = ({
         if (action) setControl(action, false);
         break;
       }
+    }
+    if (e.touches.length === 0 && activeTouchId.current !== null) {
+      activeTouchId.current = null;
+      setIsPressed(false);
+      if (action) setControl(action, false);
     }
   };
 
@@ -265,12 +280,24 @@ export const TouchActionButton: React.FC<TouchActionButtonProps> = ({
     }
   };
 
+  useEffect(() => {
+    const handleReset = () => {
+      if (activeTouchId.current !== null || isPressed) {
+        activeTouchId.current = null;
+        setIsPressed(false);
+        if (action) setControl(action, false);
+      }
+    };
+    window.addEventListener('blur', handleReset);
+    return () => window.removeEventListener('blur', handleReset);
+  }, [action, isPressed, setControl]);
+
   return (
     <button
       type="button"
       title={title}
       onTouchStart={onTouchStart}
-      onTouchMove={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      onTouchMove={(e) => { e.preventDefault(); }}
       onTouchEnd={onTouchEnd}
       onTouchCancel={onTouchCancel}
       onPointerDown={onPointerDown}
@@ -284,12 +311,265 @@ export const TouchActionButton: React.FC<TouchActionButtonProps> = ({
   );
 };
 
+/** Unified Left/Right steering pad allowing natural sliding transitions without stuck touches. */
+export const MobileSteeringPad: React.FC = () => {
+  const setControl = useGameStore((state) => state.setControl);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [activeDir, setActiveDir] = useState<'left' | 'right' | null>(null);
+  const activeTouchId = useRef<number | null>(null);
+
+  const updateSteeringFromPoint = (clientX: number, clientY: number, touchId: number) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+
+    // If finger moves far outside, release
+    if (clientY < rect.top - 50 || clientY > rect.bottom + 50 || clientX < rect.left - 50 || clientX > rect.right + 50) {
+      if (activeTouchId.current === touchId) {
+        activeTouchId.current = null;
+        setActiveDir(null);
+        setControl('left', false);
+        setControl('right', false);
+      }
+      return;
+    }
+
+    const centerX = rect.left + rect.width / 2;
+    if (clientX < centerX) {
+      if (activeDir !== 'left') {
+        setActiveDir('left');
+        setControl('left', true);
+        setControl('right', false);
+        triggerHaptic(10);
+      }
+    } else {
+      if (activeDir !== 'right') {
+        setActiveDir('right');
+        setControl('left', false);
+        setControl('right', true);
+        triggerHaptic(10);
+      }
+    }
+  };
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    e.preventDefault();
+    const touch = e.changedTouches[0];
+    activeTouchId.current = touch.identifier;
+    updateSteeringFromPoint(touch.clientX, touch.clientY, touch.identifier);
+  };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    e.preventDefault();
+    if (activeTouchId.current === null) return;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      if (touch.identifier === activeTouchId.current) {
+        updateSteeringFromPoint(touch.clientX, touch.clientY, touch.identifier);
+        break;
+      }
+    }
+  };
+
+  const onTouchEnd = (e: React.TouchEvent) => {
+    e.preventDefault();
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      if (e.changedTouches[i].identifier === activeTouchId.current) {
+        activeTouchId.current = null;
+        setActiveDir(null);
+        setControl('left', false);
+        setControl('right', false);
+        break;
+      }
+    }
+    if (e.touches.length === 0) {
+      activeTouchId.current = null;
+      setActiveDir(null);
+      setControl('left', false);
+      setControl('right', false);
+    }
+  };
+
+  useEffect(() => {
+    const handleReset = () => {
+      activeTouchId.current = null;
+      setActiveDir(null);
+      setControl('left', false);
+      setControl('right', false);
+    };
+    window.addEventListener('blur', handleReset);
+    return () => window.removeEventListener('blur', handleReset);
+  }, [setControl]);
+
+  return (
+    <div
+      ref={containerRef}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchEnd}
+      className="flex items-center gap-2 touch-none select-none cursor-pointer"
+      style={{ touchAction: 'none' }}
+    >
+      {/* Left Steer Button */}
+      <div
+        className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl border-2 flex flex-col items-center justify-center transition-all duration-75 backdrop-blur-sm pointer-events-none select-none ${
+          activeDir === 'left'
+            ? 'bg-cyan-500/60 border-cyan-300 text-white shadow-[0_0_20px_rgba(0,240,255,0.6)] ring-2 ring-cyan-300 scale-95'
+            : 'bg-cyan-950/35 border-cyan-400/40 text-cyan-200 shadow-[0_0_12px_rgba(0,240,255,0.15)]'
+        }`}
+      >
+        <ChevronLeft className="w-7 h-7 sm:w-8 sm:h-8 stroke-[2.5]" />
+        <span className="text-[8px] font-black tracking-wider">LEFT</span>
+      </div>
+
+      {/* Right Steer Button */}
+      <div
+        className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl border-2 flex flex-col items-center justify-center transition-all duration-75 backdrop-blur-sm pointer-events-none select-none ${
+          activeDir === 'right'
+            ? 'bg-cyan-500/60 border-cyan-300 text-white shadow-[0_0_20px_rgba(0,240,255,0.6)] ring-2 ring-cyan-300 scale-95'
+            : 'bg-cyan-950/35 border-cyan-400/40 text-cyan-200 shadow-[0_0_12px_rgba(0,240,255,0.15)]'
+        }`}
+      >
+        <ChevronRight className="w-7 h-7 sm:w-8 sm:h-8 stroke-[2.5]" />
+        <span className="text-[8px] font-black tracking-wider">RIGHT</span>
+      </div>
+    </div>
+  );
+};
+
+/** Unified Gas & Brake pedals cluster supporting slide transitions and simultaneous touches. */
+export const MobilePedalsCluster: React.FC = () => {
+  const setControl = useGameStore((state) => state.setControl);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [activePedal, setActivePedal] = useState<'forward' | 'backward' | null>(null);
+  const activeTouchId = useRef<number | null>(null);
+
+  const updatePedalsFromPoint = (clientX: number, clientY: number, touchId: number) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+
+    if (clientY < rect.top - 50 || clientY > rect.bottom + 50 || clientX < rect.left - 50 || clientX > rect.right + 50) {
+      if (activeTouchId.current === touchId) {
+        activeTouchId.current = null;
+        setActivePedal(null);
+        setControl('forward', false);
+        setControl('backward', false);
+      }
+      return;
+    }
+
+    // Brake is on left half, Gas is on right half
+    const centerX = rect.left + rect.width / 2;
+    if (clientX < centerX) {
+      if (activePedal !== 'backward') {
+        setActivePedal('backward');
+        setControl('forward', false);
+        setControl('backward', true);
+        triggerHaptic(10);
+      }
+    } else {
+      if (activePedal !== 'forward') {
+        setActivePedal('forward');
+        setControl('forward', true);
+        setControl('backward', false);
+        triggerHaptic(10);
+      }
+    }
+  };
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    e.preventDefault();
+    const touch = e.changedTouches[0];
+    activeTouchId.current = touch.identifier;
+    updatePedalsFromPoint(touch.clientX, touch.clientY, touch.identifier);
+  };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    e.preventDefault();
+    if (activeTouchId.current === null) return;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      if (touch.identifier === activeTouchId.current) {
+        updatePedalsFromPoint(touch.clientX, touch.clientY, touch.identifier);
+        break;
+      }
+    }
+  };
+
+  const onTouchEnd = (e: React.TouchEvent) => {
+    e.preventDefault();
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      if (e.changedTouches[i].identifier === activeTouchId.current) {
+        activeTouchId.current = null;
+        setActivePedal(null);
+        setControl('forward', false);
+        setControl('backward', false);
+        break;
+      }
+    }
+    if (e.touches.length === 0) {
+      activeTouchId.current = null;
+      setActivePedal(null);
+      setControl('forward', false);
+      setControl('backward', false);
+    }
+  };
+
+  useEffect(() => {
+    const handleReset = () => {
+      activeTouchId.current = null;
+      setActivePedal(null);
+      setControl('forward', false);
+      setControl('backward', false);
+    };
+    window.addEventListener('blur', handleReset);
+    return () => window.removeEventListener('blur', handleReset);
+  }, [setControl]);
+
+  return (
+    <div
+      ref={containerRef}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchEnd}
+      className="flex items-end gap-2 touch-none select-none cursor-pointer"
+      style={{ touchAction: 'none' }}
+    >
+      {/* Brake Pedal */}
+      <div
+        className={`w-12 h-14 sm:w-13 sm:h-15 rounded-xl border-2 flex flex-col items-center justify-center font-bold uppercase transition-all duration-75 backdrop-blur-sm pointer-events-none select-none ${
+          activePedal === 'backward'
+            ? 'bg-rose-600/60 border-rose-400 text-white shadow-[0_0_20px_rgba(244,63,94,0.6)] scale-95'
+            : 'bg-rose-950/30 border-rose-500/40 text-rose-300'
+        }`}
+      >
+        <ChevronDown className="w-5 h-5 stroke-[2.5]" />
+        <span className="text-[7.5px] font-bold tracking-wider">BRAKE</span>
+      </div>
+
+      {/* Gas Pedal */}
+      <div
+        className={`w-14 h-16 sm:w-15 sm:h-17 rounded-xl border-2 flex flex-col items-center justify-center uppercase transition-all duration-75 backdrop-blur-sm pointer-events-none select-none ${
+          activePedal === 'forward'
+            ? 'bg-cyan-500/70 border-cyan-300 text-white shadow-[0_0_25px_rgba(0,240,255,0.7)] ring-2 ring-cyan-300 scale-95'
+            : 'bg-cyan-500/25 border-cyan-400/50 text-cyan-200'
+        }`}
+      >
+        <ChevronUp className="w-6 h-6 sm:w-7 sm:h-7 stroke-[2.5]" />
+        <span className="text-[8.5px] font-black tracking-wider">GAS</span>
+      </div>
+    </div>
+  );
+};
+
 interface ControlsOverlayProps {
   onResetCar: () => void;
   onToggleCabJob?: () => void;
   onToggleCustoms?: () => void;
   onToggleMissions?: () => void;
   onToggleJetpack?: () => void;
+  onToggleParachute?: () => void;
 }
 
 export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
@@ -298,6 +578,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
   onToggleCustoms,
   onToggleMissions,
   onToggleJetpack,
+  onToggleParachute,
 }) => {
   const setControl = useGameStore((state) => state.setControl);
   const setAnalogInput = useGameStore((state) => state.setAnalogInput);
@@ -349,6 +630,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
       if (key === 'u') onToggleCustoms?.();
       if (key === 'm') onToggleMissions?.();
       if (key === 'j' || e.code === 'KeyJ') onToggleJetpack?.();
+      if (key === 'p' || e.code === 'KeyP') onToggleParachute?.();
       if (key === 'escape') {
         const s = useGameStore.getState();
         if (s.isMissionMenuOpen) s.setMissionMenuOpen(false);
@@ -381,12 +663,14 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [setControl, cycleCameraMode, cycleHeadlightMode, toggleDayNight, onResetCar, onToggleCabJob, onToggleCustoms, onToggleMissions, onToggleJetpack]);
+  }, [setControl, cycleCameraMode, cycleHeadlightMode, toggleDayNight, onResetCar, onToggleCabJob, onToggleCustoms, onToggleMissions, onToggleJetpack, onToggleParachute]);
 
   // Selective store subscriptions to avoid 60fps re-renders during gameplay
   const playerMode = useGameStore((state) => state.telemetry.playerMode ?? 'on_foot');
   const prompt = useGameStore((state) => state.telemetry.interactionPrompt);
   const jetpackActive = useGameStore((state) => state.telemetry.jetpackActive);
+  const parachuteActive = useGameStore((state) => state.telemetry.parachuteActive);
+  const altitude = useGameStore((state) => state.telemetry.altitude ?? 0);
   const jetpack = jetpackActive && playerMode === 'on_foot';
 
   // Mobile driving steering mode: 'buttons' (dedicated Left/Right steering buttons) or 'stick' (virtual thumbstick)
@@ -457,6 +741,32 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               <span className="px-1 py-0.5 rounded bg-orange-500/20 text-orange-300 font-mono font-bold text-[9px] border border-orange-500/30">J</span>
               <span className="text-orange-300">{jetpack ? 'Remove Jetpack' : 'Jetpack'}</span>
             </div>
+            {parachuteActive ? (
+              <>
+                <span className="text-gray-700 text-[8px]">•</span>
+                <div className="flex items-center gap-1">
+                  <span className="px-1 py-0.5 rounded bg-rose-500/20 text-rose-300 font-mono font-bold text-[9px] border border-rose-500/30">P</span>
+                  <span className="text-rose-300 font-bold">Cut Chute</span>
+                </div>
+                <span className="text-gray-700 text-[8px]">•</span>
+                <div className="flex items-center gap-1">
+                  <span className="px-1 py-0.5 rounded bg-white/10 text-gray-200 font-mono font-bold text-[9px]">S/SPACE</span>
+                  <span>Flare Brake</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <span className="text-gray-700 text-[8px]">•</span>
+                <div className="flex items-center gap-1">
+                  <span className={`px-1 py-0.5 rounded font-mono font-bold text-[9px] border ${
+                    altitude > 1.8 && !jetpack
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 animate-pulse'
+                      : 'bg-white/10 text-gray-200 border-transparent'
+                  }`}>P</span>
+                  <span className={altitude > 1.8 && !jetpack ? 'text-emerald-300 font-bold' : ''}>Parachute</span>
+                </div>
+              </>
+            )}
             <span className="text-gray-700 text-[8px]">•</span>
             <div className="flex items-center gap-1">
               <span className="px-1 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono font-bold text-[9px] border border-cyan-500/30">E</span>
@@ -622,27 +932,8 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
           )}
 
           {playerMode === 'driving' && drivingControlMode === 'buttons' ? (
-            /* Dedicated Left / Right Steering Buttons (Arcade GTA Mobile Style) */
-            <div className="flex items-center gap-2">
-              <TouchActionButton
-                action="left"
-                className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-cyan-950/35 border-2 border-cyan-400/40 flex flex-col items-center justify-center text-cyan-200 shadow-[0_0_12px_rgba(0,240,255,0.15)] backdrop-blur-sm"
-                activeClassName="bg-cyan-500/50 border-cyan-300 text-white shadow-[0_0_20px_rgba(0,240,255,0.5)] ring-2 ring-cyan-300 scale-95"
-                title="Steer Left (A)"
-              >
-                <ChevronLeft className="w-7 h-7 sm:w-8 sm:h-8 stroke-[2.5]" />
-                <span className="text-[8px] font-black tracking-wider">LEFT</span>
-              </TouchActionButton>
-              <TouchActionButton
-                action="right"
-                className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-cyan-950/35 border-2 border-cyan-400/40 flex flex-col items-center justify-center text-cyan-200 shadow-[0_0_12px_rgba(0,240,255,0.15)] backdrop-blur-sm"
-                activeClassName="bg-cyan-500/50 border-cyan-300 text-white shadow-[0_0_20px_rgba(0,240,255,0.5)] ring-2 ring-cyan-300 scale-95"
-                title="Steer Right (D)"
-              >
-                <ChevronRight className="w-7 h-7 sm:w-8 sm:h-8 stroke-[2.5]" />
-                <span className="text-[8px] font-black tracking-wider">RIGHT</span>
-              </TouchActionButton>
-            </div>
+            /* Dedicated Left / Right Steering Pad with fluid slide transitions */
+            <MobileSteeringPad />
           ) : (
             <VirtualThumbstick
               onMove={(x, y) => setAnalogInput(x, y)}
@@ -685,26 +976,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
               </div>
 
               {/* Primary Pedals */}
-              <div className="flex items-end gap-2">
-                <TouchActionButton
-                  action="backward"
-                  className="w-12 h-14 sm:w-13 sm:h-15 rounded-xl bg-rose-950/30 border-2 border-rose-500/40 flex flex-col items-center justify-center text-rose-300 font-bold text-[10px] uppercase backdrop-blur-sm shadow-sm"
-                  activeClassName="bg-rose-600/55 border-rose-400 text-white shadow-[0_0_20px_rgba(244,63,94,0.5)] scale-95"
-                  title="Brake / Reverse (S)"
-                >
-                  <ChevronDown className="w-5 h-5 stroke-[2.5]" />
-                  <span className="text-[7.5px] font-bold tracking-wider">BRAKE</span>
-                </TouchActionButton>
-                <TouchActionButton
-                  action="forward"
-                  className="w-14 h-16 sm:w-15 sm:h-17 rounded-xl bg-cyan-500/25 border-2 border-cyan-400/50 text-cyan-200 flex flex-col items-center justify-center font-black text-xs uppercase shadow-md backdrop-blur-sm"
-                  activeClassName="bg-cyan-500/65 border-cyan-300 text-white shadow-[0_0_25px_rgba(0,240,255,0.6)] ring-2 ring-cyan-300 scale-95"
-                  title="Gas / Accelerate (W)"
-                >
-                  <ChevronUp className="w-6 h-6 sm:w-7 sm:h-7 stroke-[2.5]" />
-                  <span className="text-[8.5px] font-black tracking-wider">GAS</span>
-                </TouchActionButton>
-              </div>
+              <MobilePedalsCluster />
             </div>
           ) : jetpack ? (
             /* Jetpack Flight: Thrust, Descend, Afterburner, Stow */
@@ -752,8 +1024,46 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                 </TouchActionButton>
               </div>
             </div>
+          ) : parachuteActive ? (
+            /* Parachute Gliding: Flare Brake, Dive, Cut Lines */
+            <div className="flex flex-col items-end gap-1.5">
+              {/* Secondary action row */}
+              <div className="flex items-center gap-1.5">
+                <TouchActionButton
+                  onTap={() => { triggerHaptic(20); onToggleParachute?.(); }}
+                  className="px-2.5 h-6 rounded-lg bg-rose-500/40 text-rose-200 border border-rose-400/50 flex items-center justify-center font-bold text-[9px] uppercase backdrop-blur-sm shadow-sm"
+                  activeClassName="bg-rose-500/70 border-rose-300 text-white"
+                  title="Cut Parachute (P)"
+                >
+                  <span className="mr-1 text-[10px]">✂️</span>
+                  <span>CUT CHUTE</span>
+                </TouchActionButton>
+              </div>
+
+              {/* Primary Dive & Flare buttons */}
+              <div className="flex items-end gap-2">
+                <TouchActionButton
+                  action="forward"
+                  className="w-13 h-13 sm:w-14 sm:h-14 aspect-square rounded-2xl bg-cyan-950/40 border-2 border-cyan-400/50 text-cyan-200 flex flex-col items-center justify-center font-bold uppercase shadow-sm backdrop-blur-sm"
+                  activeClassName="bg-cyan-500/55 border-cyan-300 text-white shadow-[0_0_20px_rgba(0,240,255,0.5)] scale-95"
+                  title="Dive Glide (W)"
+                >
+                  <ChevronDown className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2.5]" />
+                  <span className="text-[7.5px] font-bold">DIVE</span>
+                </TouchActionButton>
+                <TouchActionButton
+                  action="backward"
+                  className="w-13 h-13 sm:w-14 sm:h-14 aspect-square rounded-2xl bg-amber-500/25 border-2 border-amber-400/50 text-amber-200 flex flex-col items-center justify-center font-black uppercase shadow-md backdrop-blur-sm"
+                  activeClassName="bg-amber-500/65 border-amber-300 text-white shadow-[0_0_25px_rgba(245,158,11,0.6)] ring-2 ring-amber-300 scale-95"
+                  title="Flare Brake (S / Space)"
+                >
+                  <ChevronUp className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2.5]" />
+                  <span className="text-[7.5px] font-black">FLARE</span>
+                </TouchActionButton>
+              </div>
+            </div>
           ) : (
-            /* On-Foot: Jump, Sprint, Enter Car, Jetpack */
+            /* On-Foot: Jump, Sprint, Enter Car, Jetpack, Parachute */
             <div className="flex flex-col items-end gap-1.5">
               {/* Secondary on-foot actions row */}
               <div className="flex items-center gap-1.5">
@@ -769,6 +1079,19 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
                 >
                   <Car className="w-3.5 h-3.5 mr-1" />
                   <span>ENTER</span>
+                </TouchActionButton>
+                <TouchActionButton
+                  onTap={() => { triggerHaptic(15); onToggleParachute?.(); }}
+                  className={`px-2.5 h-6 rounded-lg border flex items-center justify-center font-bold text-[9px] uppercase backdrop-blur-sm shadow-sm transition-all ${
+                    altitude > 1.8 && !jetpack
+                      ? 'bg-emerald-500/40 text-emerald-100 border-emerald-400 ring-1 ring-emerald-400 animate-pulse'
+                      : 'bg-slate-950/40 border-emerald-500/30 text-emerald-300'
+                  }`}
+                  activeClassName="bg-emerald-500/60 border-emerald-300 text-white"
+                  title="Deploy Parachute (P)"
+                >
+                  <span className="mr-1 text-[11px]">🪂</span>
+                  <span>CHUTE</span>
                 </TouchActionButton>
                 <TouchActionButton
                   onTap={() => { triggerHaptic(15); onToggleJetpack?.(); }}

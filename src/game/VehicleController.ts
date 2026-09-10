@@ -6,10 +6,16 @@ import { audioManager } from './AudioManager';
 import { CityTextures } from './CityTextures';
 import { createBusModel } from './models/BusModelBuilder';
 
-export const PLAYER_SPAWN_X = -26.5;
-export const DEFAULT_SPAWN_POS = new THREE.Vector3(PLAYER_SPAWN_X, 0.0, 0);
+export const PLAYER_SPAWN_X = 0.0;
+export const DEFAULT_SPAWN_POS = new THREE.Vector3(0.0, 0.05, 5.0);
 
-const GRAVITY = 9.81;
+export const GRAVITY = 9.81;
+
+// Real-world 6-speed transmission ratios & drivetrain constants
+export const GEAR_RATIOS = [3.55, 2.15, 1.48, 1.12, 0.89, 0.73];
+export const REVERSE_RATIO = 3.40;
+export const FINAL_DRIVE = 3.70;
+export const WHEEL_RADIUS = 0.40;
 
 /** Result of a car-vs-dynamic-body collision, so the other body can react with its share of the impulse. */
 export interface DynamicCollisionResult {
@@ -65,11 +71,13 @@ export class VehicleController {
   public frontSlipAngle: number = 0;
   public isDrifting: boolean = false;
   public isWheelspin: boolean = false;
+  public isBoosting: boolean = false;
   private prevHandbrake: boolean = false;
   private prevWheelspin: boolean = false;
   public driftScore: number = 0;
 
   // Damage model
+  public isDriverInside: boolean = false;
   public health: number = 100;
   public isWrecked: boolean = false;
   public lastImpactSpeed: number = 0;
@@ -234,6 +242,18 @@ export class VehicleController {
   public repair() {
     this.health = 100;
     this.isWrecked = false;
+  }
+
+  public onDriverEnter() {
+    this.isDriverInside = true;
+  }
+
+  public onDriverExit() {
+    this.isDriverInside = false;
+    this.isDrifting = false;
+    this.isWheelspin = false;
+    this.isBoosting = false;
+    audioManager.stopVehicleAudio();
   }
 
   /**
@@ -636,6 +656,7 @@ export class VehicleController {
       reverse = 0;
       boosting = false;
     }
+    this.isBoosting = boosting;
 
     // --- Fixed substep integration ------------------------------------------
     const numSubSteps = Math.max(4, Math.ceil(dt / 0.006));
@@ -754,8 +775,8 @@ export class VehicleController {
         r *= 1 - Math.min(1, h * 20);
       }
 
-      this.longAccel = fxTotal / m;
-      this.lateralAccel = fyTotal / m;
+      this.longAccel = ax;
+      this.lateralAccel = ay;
 
       // Integrate heading, rebuild world velocity from the body frame
       this.heading += r * h;
@@ -789,31 +810,37 @@ export class VehicleController {
       this.driftScore += Math.round(absVx * dt * 25);
     }
 
-    // Dynamic tire screech modulated with slip angle and speed
-    const totalSlip = Math.abs(rearSlip) + Math.abs(frontSlip) * 0.5;
-    audioManager.setDrifting(this.isDrifting || this.isWheelspin, totalSlip, Math.abs(this.speedKmh));
-    audioManager.playHorn(controls.horn);
+    // Audio updates - ONLY if driver is inside!
+    if (this.isDriverInside) {
+      // Dynamic tire screech modulated with slip angle and speed
+      const totalSlip = Math.abs(rearSlip) + Math.abs(frontSlip) * 0.5;
+      audioManager.setDrifting(this.isDrifting || this.isWheelspin, totalSlip, Math.abs(this.speedKmh));
+      audioManager.playHorn(controls.horn);
 
-    // Mechanical handbrake click on engage
-    if (handbrake && !this.prevHandbrake) {
-      audioManager.playHandbrakeClick();
+      // Mechanical handbrake click on engage
+      if (handbrake && !this.prevHandbrake) {
+        audioManager.playHandbrakeClick();
+      }
+
+      // Tire burnout launch chirp
+      if (this.isWheelspin && !this.prevWheelspin && absVx < 2.5 && controls.forward) {
+        audioManager.playTireBurnoutChirp();
+      }
+
+      // Telemetry speed in KM/H
+      this.speedKmh = Math.round(vx * 3.6);
+      audioManager.updateEngine(
+        this.isWrecked ? 0 : this.speedKmh,
+        (controls.forward || controls.boost) && !this.isWrecked,
+        controls.boost && !this.isWrecked,
+        this.currentVehicleId
+      );
+    } else {
+      // Unoccupied coasting physics: keep speed telemetry updated without audio
+      this.speedKmh = Math.round(vx * 3.6);
     }
     this.prevHandbrake = handbrake;
-
-    // Tire burnout launch chirp
-    if (this.isWheelspin && !this.prevWheelspin && absVx < 2.5 && controls.forward) {
-      audioManager.playTireBurnoutChirp();
-    }
     this.prevWheelspin = this.isWheelspin;
-
-    // Telemetry speed in KM/H
-    this.speedKmh = Math.round(vx * 3.6);
-    audioManager.updateEngine(
-      this.isWrecked ? 0 : this.speedKmh,
-      (controls.forward || controls.boost) && !this.isWrecked,
-      controls.boost && !this.isWrecked,
-      this.currentVehicleId
-    );
 
     // --- Wheel animation -----------------------------------------------------
     const wheelRadius = 0.40;
@@ -858,27 +885,28 @@ export class VehicleController {
     const fwdZ = this._fwd.z;
     const leftX = this._left.x;
     const leftZ = this._left.z;
-    const halfW = this.trackWidth * 0.48;
-    const wbFront = this.wheelBase * 1.05;
-    const wbRear = this.wheelBase * 1.05;
-    const radius = Math.max(0.48, this.collisionRadius * 0.58);
+    const halfW = this.trackWidth * 0.44;
+    const wbFront = this.wheelBase * 0.98;
+    const wbRear = this.wheelBase * 0.98;
+    const radius = Math.max(0.35, this.collisionRadius * 0.44);
     const radiusSq = radius * radius;
     const restitution = 0.18;
 
-    // 8-point perimeter hull protecting corners and flanks from wall clipping
+    // 9-point perimeter hull protecting center, corners, and flanks from wall clipping
     const hullPoints = [
+      { fwd: 0, lat: 0 },                   // Center
       { fwd: wbFront, lat: 0 },             // Front-Center
-      { fwd: wbFront * 0.95, lat: halfW },  // Front-Left corner
-      { fwd: wbFront * 0.95, lat: -halfW }, // Front-Right corner
+      { fwd: wbFront * 0.92, lat: halfW },  // Front-Left corner
+      { fwd: wbFront * 0.92, lat: -halfW }, // Front-Right corner
       { fwd: 0, lat: halfW },                // Mid-Left flank
       { fwd: 0, lat: -halfW },               // Mid-Right flank
       { fwd: -wbRear, lat: 0 },             // Rear-Center
-      { fwd: -wbRear * 0.95, lat: halfW },  // Rear-Left corner
-      { fwd: -wbRear * 0.95, lat: -halfW }, // Rear-Right corner
+      { fwd: -wbRear * 0.92, lat: halfW },  // Rear-Left corner
+      { fwd: -wbRear * 0.92, lat: -halfW }, // Rear-Right corner
     ];
 
-    // 2-pass relaxation loop to resolve compound corner penetration
-    for (let pass = 0; pass < 2; pass++) {
+    // 3-pass relaxation loop to resolve compound corner penetration
+    for (let pass = 0; pass < 3; pass++) {
       for (let s = 0; s < hullPoints.length; s++) {
         const hp = hullPoints[s];
         let sx = nextPos.x + fwdX * hp.fwd + leftX * hp.lat;
@@ -887,12 +915,14 @@ export class VehicleController {
         for (let i = 0; i < cityColliders.length; i++) {
           const box = cityColliders[i];
 
-          // Fast bounding rejection
+          // Fast bounding & elevation rejection
           if (
             sx < box.min.x - radius ||
             sx > box.max.x + radius ||
             sz < box.min.z - radius ||
-            sz > box.max.z + radius
+            sz > box.max.z + radius ||
+            box.min.y > nextPos.y + 2.5 ||
+            box.max.y < nextPos.y - 1.0
           ) {
             continue;
           }
@@ -906,16 +936,29 @@ export class VehicleController {
             sz >= box.min.z && sz <= box.max.z;
 
           if (isInside) {
+            const prevX = this.position.x;
+            const prevZ = this.position.z;
             const dLeft = sx - box.min.x;
             const dRight = box.max.x - sx;
             const dBottom = sz - box.min.z;
             const dTop = box.max.z - sz;
-            const minD = Math.min(dLeft, dRight, dBottom, dTop);
-            if (minD === dLeft) { nx = -1; nz = 0; }
-            else if (minD === dRight) { nx = 1; nz = 0; }
-            else if (minD === dBottom) { nx = 0; nz = -1; }
-            else { nx = 0; nz = 1; }
-            penetration = minD + radius + 0.05;
+
+            // Determine de-penetration normal based on entry direction to eliminate tunneling
+            if (prevX <= box.min.x) {
+              nx = -1; nz = 0; penetration = dLeft + radius + 0.04;
+            } else if (prevX >= box.max.x) {
+              nx = 1; nz = 0; penetration = dRight + radius + 0.04;
+            } else if (prevZ <= box.min.z) {
+              nx = 0; nz = -1; penetration = dBottom + radius + 0.04;
+            } else if (prevZ >= box.max.z) {
+              nx = 0; nz = 1; penetration = dTop + radius + 0.04;
+            } else {
+              const minD = Math.min(dLeft, dRight, dBottom, dTop);
+              if (minD === dLeft) { nx = -1; nz = 0; penetration = dLeft + radius + 0.04; }
+              else if (minD === dRight) { nx = 1; nz = 0; penetration = dRight + radius + 0.04; }
+              else if (minD === dBottom) { nx = 0; nz = -1; penetration = dBottom + radius + 0.04; }
+              else { nx = 0; nz = 1; penetration = dTop + radius + 0.04; }
+            }
           } else {
             const cx = Math.max(box.min.x, Math.min(sx, box.max.x));
             const cz = Math.max(box.min.z, Math.min(sz, box.max.z));
@@ -926,7 +969,7 @@ export class VehicleController {
             const dist = Math.sqrt(distSq) || 0.0001;
             nx = dx / dist;
             nz = dz / dist;
-            penetration = radius - dist + 0.04;
+            penetration = radius - dist + 0.03;
           }
 
           // De-penetrate
@@ -962,6 +1005,7 @@ export class VehicleController {
           const intensity = Math.min(impactSpeed / 7.0, 1.8);
           this.bodyPitch -= intensity * 0.1;
           this.bodyRoll += hitTorque * 0.15;
+          this.applyChassisImpulse(-intensity * 0.08, hitTorque * 0.12, intensity * 0.035);
 
           if (impactSpeed > 0.7) {
             audioManager.playCrash(intensity);
@@ -1089,6 +1133,7 @@ export class VehicleController {
       const intensity = Math.min(relSpeed / 7.0, 1.8);
       this.bodyPitch -= intensity * 0.08;
       this.bodyRoll += hitTorque * 0.12;
+      this.applyChassisImpulse(-intensity * 0.06, hitTorque * 0.10, intensity * 0.03);
 
       if (relSpeed > 0.8) audioManager.playCrash(intensity);
       // Car-on-car hits crumple both bodies, so each takes roughly half of a wall hit
@@ -1107,7 +1152,7 @@ export class VehicleController {
     return null;
   }
 
-  public applyChassisImpulse(pitch: number, roll: number) {
+  public applyChassisImpulse(pitch: number, roll: number, _heave: number = 0) {
     this.chassisImpulseVel.x += pitch * 14.0;
     this.chassisImpulseVel.y += roll * 14.0;
     this.chassisPitchImpulse += pitch;
@@ -1191,9 +1236,41 @@ export class VehicleController {
     this.longAccel = 0;
     this.lateralAccel = 0;
     this.isDrifting = false;
+    this.driftScore = 0;
+    this.bodyPitch = 0;
+    this.bodyRoll = 0;
+    this.chassisPitchImpulse = 0;
+    this.chassisRollImpulse = 0;
+    this.chassisImpulseVel.set(0, 0);
     this.rootGroup.position.copy(this.position);
     this.rootGroup.rotation.y = this.heading;
+    this.chassisGroup.position.set(0, 0, 0);
     this.chassisGroup.rotation.set(0, 0, 0);
+  }
+
+  public get currentGearLabel(): string {
+    const absSpeed = Math.abs(this.speedKmh);
+    if (absSpeed < 1.0) return 'N';
+    if (this.speedKmh < -1.0) return 'R';
+    if (absSpeed < 25) return '1';
+    if (absSpeed < 50) return '2';
+    if (absSpeed < 80) return '3';
+    if (absSpeed < 115) return '4';
+    if (absSpeed < 155) return '5';
+    return '6';
+  }
+
+  public get currentRpm(): number {
+    const absSpeed = Math.abs(this.speedKmh);
+    if (absSpeed < 1.0) return 900;
+    let gearProgress = 0;
+    if (absSpeed < 25) gearProgress = absSpeed / 25;
+    else if (absSpeed < 50) gearProgress = (absSpeed - 20) / 30;
+    else if (absSpeed < 80) gearProgress = (absSpeed - 45) / 35;
+    else if (absSpeed < 115) gearProgress = (absSpeed - 75) / 40;
+    else if (absSpeed < 155) gearProgress = (absSpeed - 110) / 45;
+    else gearProgress = Math.min(1.0, (absSpeed - 150) / 50);
+    return Math.round(1000 + Math.max(0, Math.min(1, gearProgress)) * 5800);
   }
 
   getStats(): VehicleStats {

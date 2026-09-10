@@ -3,11 +3,10 @@ import { useGameStore } from '../../store/useGameStore';
 import { Heart, Shield, Car, Wrench } from 'lucide-react';
 
 export const GTAHealthBar: React.FC = () => {
-  const telemetry = useGameStore((state) => state.telemetry);
+  const playerMode = useGameStore((state) => state.telemetry.playerMode ?? 'on_foot');
   const health = useGameStore((state) => state.health);
   const armor = useGameStore((state) => state.armor);
   const vehicleHealth = useGameStore((state) => state.vehicleHealth);
-  const playerMode = telemetry.playerMode ?? 'on_foot';
 
   const isDriving = playerMode === 'driving';
   const low = health <= 30;
