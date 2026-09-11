@@ -135,7 +135,7 @@ export class SmokeEffects {
   /** Jetpack exhaust: quick bright vapour puffs blown downward, rate scales with thrust. */
   emitExhaust(nozzlePos: THREE.Vector3, thrust01: number, dt: number) {
     if (thrust01 <= 0.05) return;
-    this.exhaustAccumulator += (8 + thrust01 * 40) * dt;
+    this.exhaustAccumulator += (4 + thrust01 * 16) * dt;
     while (this.exhaustAccumulator >= 1) {
       this.exhaustAccumulator -= 1;
       if (this.puffs.length >= this.maxPuffs) break;
@@ -174,7 +174,9 @@ export class SmokeEffects {
       const p = this.puffs[i];
       p.life += dt;
       if (p.life >= p.maxLife) {
-        this.puffs.splice(i, 1);
+        // Fast O(1) swap-and-pop removal prevents array memory shift stalls
+        this.puffs[i] = this.puffs[this.puffs.length - 1];
+        this.puffs.pop();
         continue;
       }
       // Buoyancy + air drag

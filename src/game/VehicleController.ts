@@ -124,6 +124,7 @@ export class VehicleController {
   // Scratch vectors (avoid per-frame allocations in the substep loop)
   private _fwd = new THREE.Vector3();
   private _left = new THREE.Vector3();
+  private _substepNextPos = new THREE.Vector3();
 
   constructor(initialVehicleId: VehicleModelId = 'Car_06') {
     this.rootGroup = new THREE.Group();
@@ -784,7 +785,7 @@ export class VehicleController {
       this.velocity.copy(this._fwd).multiplyScalar(vx).addScaledVector(this._left, vy);
 
       // Position + static collision resolution
-      const nextPos = this.position.clone().addScaledVector(this.velocity, h);
+      const nextPos = this._substepNextPos.copy(this.position).addScaledVector(this.velocity, h);
       r = this.resolveStaticCollisions(nextPos, cityColliders, r, m, Iz, onImpact);
       this.position.copy(nextPos);
 

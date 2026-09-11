@@ -272,6 +272,11 @@ export class LightingManager {
   private currentHeadlightMode: HeadlightMode = 'low';
   private sunLightOffset: THREE.Vector3 = new THREE.Vector3(45, 75, 40);
 
+  // Streetlight distance throttling & thermal control
+  private lastStreetlightUpdatePos: THREE.Vector3 = new THREE.Vector3(9999, 9999, 9999);
+  private lastStreetlightUpdateTime: number = 0;
+  private maxActiveStreetlights: number = 6;
+
   constructor(scene: THREE.Scene) {
     this.scene = scene;
 
@@ -283,12 +288,12 @@ export class LightingManager {
     this.hemiLight = new THREE.HemisphereLight(0xb1e1ff, 0xb97a20, 0.55);
     this.scene.add(this.hemiLight);
 
-    // Directional Sun Light with sharp, non-peter-panning contact shadows
+    // Directional Sun Light with sharp, non-peter-panning contact shadows (1024x1024 for high thermal efficiency)
     this.sunLight = new THREE.DirectionalLight(0xfff5e6, 1.25);
     this.sunLight.position.set(45, 75, 40);
     this.sunLight.castShadow = true;
-    this.sunLight.shadow.mapSize.width = 2048;
-    this.sunLight.shadow.mapSize.height = 2048;
+    this.sunLight.shadow.mapSize.width = 1024;
+    this.sunLight.shadow.mapSize.height = 1024;
     this.sunLight.shadow.camera.near = 10;
     this.sunLight.shadow.camera.far = 160;
 
@@ -303,8 +308,8 @@ export class LightingManager {
     this.scene.add(this.sunLight);
     this.scene.add(this.sunLight.target);
 
-    // 12 Dynamic street light point sources that follow player to illuminate nearby avenues
-    for (let i = 0; i < 12; i++) {
+    // 6 Dynamic street light point sources that follow player to illuminate nearby avenues (thermally optimized)
+    for (let i = 0; i < 6; i++) {
       const pl = new THREE.PointLight(0xffdf88, 0, 32, 1.2);
       this.scene.add(pl);
       this.dynamicStreetLights.push(pl);
@@ -339,6 +344,12 @@ export class LightingManager {
 
   setSunShadows(enabled: boolean) {
     this.sunLight.castShadow = enabled;
+  }
+
+  setDynamicStreetLightsQuality(quality: 'low' | 'medium' | 'high') {
+    if (quality === 'low') this.maxActiveStreetlights = 2;
+    else if (quality === 'medium') this.maxActiveStreetlights = 4;
+    else this.maxActiveStreetlights = 6;
   }
 
   setBrakeLights(isBraking: boolean) {
@@ -804,7 +815,7 @@ export class LightingManager {
       this.tailLightR.intensity = Math.min(1.4, baseTail);
     }
 
-    // 6. Dynamic Streetlight illumination around player
+    // 6. Dynamic Streetlight illumination around player (throttled)
     if (this.streetLightPositions.length > 0) {
       if (sky.darknessFactor < 0.12 && sunsetFactor < 0.20) {
         this.dynamicStreetLights.forEach((l) => (l.intensity = 0));
@@ -814,21 +825,7 @@ export class LightingManager {
           3.6,
           sky.darknessFactor
         );
-        const nearest = [...this.streetLightPositions]
-          .sort((a, b) => a.distanceToSquared(activeFocusPos) - b.distanceToSquared(activeFocusPos))
-          .slice(0, 12);
-
-        for (let i = 0; i < this.dynamicStreetLights.length; i++) {
-          const pl = this.dynamicStreetLights[i];
-          if (i < nearest.length) {
-            const p = nearest[i];
-            pl.position.set(p.x, p.y + 7.5, p.z + 2.6);
-            pl.intensity = targetIntensity;
-            pl.color.setHex(0xffdf88);
-          } else {
-            pl.intensity = 0;
-          }
-        }
+        this.updateNearbyStreetlights(activeFocusPos, targetIntensity);
       }
     }
 
@@ -871,6 +868,45 @@ export class LightingManager {
     }
   }
 
+  private updateNearbyStreetlights(focusPos: THREE.Vector3, targetIntensity: number, force: boolean = false) {
+    if (this.streetLightPositions.length === 0 || this.maxActiveStreetlights <= 0) {
+      this.dynamicStreetLights.forEach((l) => (l.intensity = 0));
+      return;
+    }
+
+    const now = performance.now();
+    const movedSq = focusPos.distanceToSquared(this.lastStreetlightUpdatePos);
+    // Throttle: only re-calculate nearest streetlights when player moves > 3.5m or > 350ms elapsed
+    if (!force && movedSq < 12.25 && (now - this.lastStreetlightUpdateTime) < 350) {
+      for (let i = 0; i < this.maxActiveStreetlights; i++) {
+        if (this.dynamicStreetLights[i].intensity > 0) {
+          this.dynamicStreetLights[i].intensity = targetIntensity;
+        }
+      }
+      return;
+    }
+
+    this.lastStreetlightUpdatePos.copy(focusPos);
+    this.lastStreetlightUpdateTime = now;
+
+    const count = Math.min(this.maxActiveStreetlights, this.dynamicStreetLights.length);
+    const sorted = [...this.streetLightPositions]
+      .sort((a, b) => a.distanceToSquared(focusPos) - b.distanceToSquared(focusPos))
+      .slice(0, count);
+
+    for (let i = 0; i < this.dynamicStreetLights.length; i++) {
+      const pl = this.dynamicStreetLights[i];
+      if (i < sorted.length) {
+        const p = sorted[i];
+        pl.position.set(p.x, p.y + 7.5, p.z + 2.6);
+        pl.intensity = targetIntensity;
+        pl.color.setHex(0xffdf88);
+      } else {
+        pl.intensity = 0;
+      }
+    }
+  }
+
   updateCarPosition(carPos: THREE.Vector3) {
     // Keep sun shadow frustum centered around player/car for crisp contact shadows
     this.sunLight.position.copy(carPos).add(this.sunLightOffset);
@@ -882,22 +918,9 @@ export class LightingManager {
       return;
     }
 
-    // Illuminate car and nearby streets with up to 12 closest streetlights
+    // Illuminate car and nearby streets with nearest streetlights (throttled)
     const targetIntensity = this.currentMode === 'night' ? 3.6 : 1.8;
-    const nearest = [...this.streetLightPositions]
-      .sort((a, b) => a.distanceToSquared(carPos) - b.distanceToSquared(carPos))
-      .slice(0, 12);
-
-    for (let i = 0; i < this.dynamicStreetLights.length; i++) {
-      const pl = this.dynamicStreetLights[i];
-      if (i < nearest.length) {
-        const p = nearest[i];
-        pl.position.set(p.x, p.y + 7.5, p.z + 2.6);
-        pl.intensity = targetIntensity;
-      } else {
-        pl.intensity = 0;
-      }
-    }
+    this.updateNearbyStreetlights(carPos, targetIntensity);
   }
 
   flashHeadlights(durationMs: number = 450) {

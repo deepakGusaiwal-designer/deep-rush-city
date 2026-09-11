@@ -205,7 +205,8 @@ export class DynamicSky {
     });
 
     this.skyMesh = new THREE.Mesh(skyGeo, this.skyMaterial);
-    this.skyMesh.renderOrder = -100;
+    // Render after opaque scene objects so hardware early-Z discards occluded sky pixels before fragment shader runs
+    this.skyMesh.renderOrder = 1000;
     this.skyMesh.frustumCulled = false;
     this.scene.add(this.skyMesh);
 

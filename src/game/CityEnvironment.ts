@@ -455,9 +455,18 @@ export class CityEnvironment {
 
             if ((node as THREE.Mesh).isMesh) {
               const mesh = node as THREE.Mesh;
-              mesh.castShadow = true;
               mesh.receiveShadow = true;
               const parentName = node.parent ? (node.parent.name || '') : '';
+              // Prune flat road and sidewalk surfaces from shadow pass to save thousands of depth writes
+              const isGroundSurface =
+                CityEnvironment.isWalkableMesh(name) ||
+                CityEnvironment.isWalkableMesh(parentName) ||
+                name.toLowerCase().includes('road') ||
+                name.toLowerCase().includes('asphalt') ||
+                name.toLowerCase().includes('tile') ||
+                name.toLowerCase().includes('sidewalk');
+              mesh.castShadow = !isGroundSurface;
+
               if (node.visible && (CityEnvironment.isWalkableMesh(name) || CityEnvironment.isWalkableMesh(parentName))) {
                 this.walkableMeshes.push(mesh);
               }
@@ -883,6 +892,15 @@ export class CityEnvironment {
         chunkGroup.updateMatrixWorld(true);
         this.cityRootGroup.add(chunkGroup);
 
+        // Distant cloned chunks are outside the 42m shadow frustum; disable castShadow on them to eliminate shadow draw calls
+        if (!isCenter) {
+          chunkGroup.traverse((child) => {
+            if ((child as THREE.Mesh).isMesh) {
+              child.castShadow = false;
+            }
+          });
+        }
+
         const chunkColliders: THREE.Box3[] = this.chunkLocalColliders.map((box) => {
           const cb = box.clone();
           cb.translate(new THREE.Vector3(dx * CHUNK_WIDTH, 0, dz * CHUNK_DEPTH));
@@ -895,7 +913,9 @@ export class CityEnvironment {
             const name = node.name || '';
             const parentName = node.parent ? (node.parent.name || '') : '';
             if (CityEnvironment.isWalkableMesh(name) || CityEnvironment.isWalkableMesh(parentName)) {
-              walkable.push(node as THREE.Mesh);
+              const m = node as THREE.Mesh;
+              m.userData.worldBox = new THREE.Box3().setFromObject(m);
+              walkable.push(m);
             }
           }
         });
@@ -970,8 +990,31 @@ export class CityEnvironment {
             recycled.colliders[i].min.set(baseBox.min.x + offsetX, baseBox.min.y, baseBox.min.z + offsetZ);
             recycled.colliders[i].max.set(baseBox.max.x + offsetX, baseBox.max.y, baseBox.max.z + offsetZ);
           }
+          for (const m of recycled.walkableMeshes) {
+            m.userData.worldBox = new THREE.Box3().setFromObject(m);
+          }
         }
       }
+    }
+
+    // Shadow optimization: keep castShadow enabled only on the active center chunk (within 42m shadow frustum)
+    for (const chunk of this.chunks) {
+      const isCenter = chunk.gridX === targetChunkX && chunk.gridZ === targetChunkZ;
+      chunk.group.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          const m = child as THREE.Mesh;
+          const name = m.name || '';
+          const parentName = m.parent?.name || '';
+          const isGround =
+            CityEnvironment.isWalkableMesh(name) ||
+            CityEnvironment.isWalkableMesh(parentName) ||
+            name.toLowerCase().includes('road') ||
+            name.toLowerCase().includes('asphalt') ||
+            name.toLowerCase().includes('tile') ||
+            name.toLowerCase().includes('sidewalk');
+          m.castShadow = isCenter && !isGround;
+        }
+      });
     }
   }
 

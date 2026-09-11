@@ -63,6 +63,15 @@ export class PlayerCharacter {
   public leftToggleMesh!: THREE.Mesh;
   public rightToggleMesh!: THREE.Mesh;
 
+  // Scratch vectors for zero-allocation parachute ropes (eliminates 1,500 GC allocations/sec)
+  private _ropeCellLocal = new THREE.Vector3();
+  private _ropeTopPos = new THREE.Vector3();
+  private _ropeLeftRiserPos = new THREE.Vector3(-0.18, 0.12, 0.04);
+  private _ropeRightRiserPos = new THREE.Vector3(0.18, 0.12, 0.04);
+  private _ropeLeftHandPos = new THREE.Vector3(-0.35, 0.16, 0.27);
+  private _ropeRightHandPos = new THREE.Vector3(0.35, 0.16, 0.27);
+  private _ropeHandWorld = new THREE.Vector3();
+
   // Animation state
   public animState: CharacterAnimState = 'IDLE';
   private cycle: number = 0;
@@ -1095,23 +1104,22 @@ export class PlayerCharacter {
 
     this.parachuteCanopyGroup.updateMatrix();
 
-    // Riser attachment coordinates in parachuteGroup space (at top of shoulder webbing straps)
-    const leftRiserPos = new THREE.Vector3(-0.18, 0.12, 0.04);
-    const rightRiserPos = new THREE.Vector3(0.18, 0.12, 0.04);
+    // Riser attachment coordinates in parachuteGroup space
+    this._ropeLeftRiserPos.set(-0.18, 0.12, 0.04);
+    this._ropeRightRiserPos.set(0.18, 0.12, 0.04);
 
     // Hand coordinates in parachuteGroup space
-    const handWorld = new THREE.Vector3();
-    const leftHandPos = new THREE.Vector3(-0.35, 0.16, 0.27);
-    const rightHandPos = new THREE.Vector3(0.35, 0.16, 0.27);
+    this._ropeLeftHandPos.set(-0.35, 0.16, 0.27);
+    this._ropeRightHandPos.set(0.35, 0.16, 0.27);
 
     if (this.leftHandGroup && this.rightHandGroup) {
-      this.leftHandGroup.getWorldPosition(handWorld);
-      leftHandPos.copy(handWorld);
-      this.parachuteGroup.worldToLocal(leftHandPos);
+      this.leftHandGroup.getWorldPosition(this._ropeHandWorld);
+      this._ropeLeftHandPos.copy(this._ropeHandWorld);
+      this.parachuteGroup.worldToLocal(this._ropeLeftHandPos);
 
-      this.rightHandGroup.getWorldPosition(handWorld);
-      rightHandPos.copy(handWorld);
-      this.parachuteGroup.worldToLocal(rightHandPos);
+      this.rightHandGroup.getWorldPosition(this._ropeHandWorld);
+      this._ropeRightHandPos.copy(this._ropeHandWorld);
+      this.parachuteGroup.worldToLocal(this._ropeRightHandPos);
     }
 
     const posAttr = this.parachuteLineGeo.getAttribute('position') as THREE.BufferAttribute;
@@ -1123,11 +1131,10 @@ export class PlayerCharacter {
     const cellWidth = span / numCells;
     const cellThick = 0.22;
 
-    const topPos = new THREE.Vector3();
-
-    const addSegment = (cellLocal: THREE.Vector3, anchorPos: THREE.Vector3) => {
-      topPos.copy(cellLocal).applyMatrix4(this.parachuteCanopyGroup.matrix);
-      posAttr.setXYZ(vIdx++, topPos.x, topPos.y, topPos.z);
+    const addSegment = (localX: number, localY: number, localZ: number, anchorPos: THREE.Vector3) => {
+      this._ropeCellLocal.set(localX, localY, localZ);
+      this._ropeTopPos.copy(this._ropeCellLocal).applyMatrix4(this.parachuteCanopyGroup.matrix);
+      posAttr.setXYZ(vIdx++, this._ropeTopPos.x, this._ropeTopPos.y, this._ropeTopPos.z);
       posAttr.setXYZ(vIdx++, anchorPos.x, anchorPos.y, anchorPos.z);
     };
 
@@ -1139,26 +1146,26 @@ export class PlayerCharacter {
 
       if (c === 3) {
         // Center cell: dual balanced lines to both left and right risers
-        addSegment(new THREE.Vector3(cx - 0.08, archY, chord * 0.35), leftRiserPos);
-        addSegment(new THREE.Vector3(cx + 0.08, archY, chord * 0.35), rightRiserPos);
-        addSegment(new THREE.Vector3(cx - 0.08, archY, 0), leftRiserPos);
-        addSegment(new THREE.Vector3(cx + 0.08, archY, 0), rightRiserPos);
+        addSegment(cx - 0.08, archY, chord * 0.35, this._ropeLeftRiserPos);
+        addSegment(cx + 0.08, archY, chord * 0.35, this._ropeRightRiserPos);
+        addSegment(cx - 0.08, archY, 0, this._ropeLeftRiserPos);
+        addSegment(cx + 0.08, archY, 0, this._ropeRightRiserPos);
       } else {
-        const riser = cx < 0 ? leftRiserPos : rightRiserPos;
-        addSegment(new THREE.Vector3(cx, archY, chord * 0.35), riser);
-        addSegment(new THREE.Vector3(cx, archY, 0), riser);
+        const riser = cx < 0 ? this._ropeLeftRiserPos : this._ropeRightRiserPos;
+        addSegment(cx, archY, chord * 0.35, riser);
+        addSegment(cx, archY, 0, riser);
       }
     }
 
     // 2. Trailing Edge Brake Steering Lines (4 lines: 2 to left hand, 2 to right hand)
     const archY0 = -0.22 * 1.0 - cellThick * 0.5;
-    addSegment(new THREE.Vector3(-3 * cellWidth, archY0, -chord * 0.46), leftHandPos);
+    addSegment(-3 * cellWidth, archY0, -chord * 0.46, this._ropeLeftHandPos);
 
     const archY1 = -0.22 * 0.444 - cellThick * 0.5;
-    addSegment(new THREE.Vector3(-2 * cellWidth, archY1, -chord * 0.44), leftHandPos);
+    addSegment(-2 * cellWidth, archY1, -chord * 0.44, this._ropeLeftHandPos);
 
-    addSegment(new THREE.Vector3(3 * cellWidth, archY0, -chord * 0.46), rightHandPos);
-    addSegment(new THREE.Vector3(2 * cellWidth, archY1, -chord * 0.44), rightHandPos);
+    addSegment(3 * cellWidth, archY0, -chord * 0.46, this._ropeRightHandPos);
+    addSegment(2 * cellWidth, archY1, -chord * 0.44, this._ropeRightHandPos);
 
     posAttr.needsUpdate = true;
   }

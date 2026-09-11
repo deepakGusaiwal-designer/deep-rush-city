@@ -148,6 +148,13 @@ export class CityGameEngine {
   private lastDayNightMode: DayNightMode | null = null;
   private lastHeadlightMode: HeadlightMode | null = null;
 
+  // Frame rate pacing & thermal control (60 FPS cap on 120Hz ProMotion/AMOLED displays)
+  public targetFps: number = 60;
+  private minFrameTimeMs: number = 1000 / 60;
+  private lastFrameTimestamp: number = 0;
+  private _jetNozzleL = new THREE.Vector3();
+  private _jetNozzleR = new THREE.Vector3();
+
   constructor(container: HTMLElement) {
     this.container = container;
     this.clock = new THREE.Clock();
@@ -159,7 +166,7 @@ export class CityGameEngine {
     this.renderer = createRenderer();
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     const isMobile = isMobileDevice();
-    const maxDpr = isMobile ? 1.35 : 2.0;
+    const maxDpr = isMobile ? 1.15 : 1.25;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxDpr));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -254,8 +261,9 @@ export class CityGameEngine {
     // Bind interactive mouse left-click drag orbit & zoom
     this.cameraSystem.bindEvents(this.renderer.domElement);
 
-    // Bind window resize
+    // Bind window resize & background tab suspension
     window.addEventListener('resize', this.onWindowResize);
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
 
     // Initialize audio on first click/interaction/touch
     const startAudio = () => {
@@ -655,7 +663,8 @@ export class CityGameEngine {
     if (this.isRunning || this.isDisposed) return;
     this.isRunning = true;
     this.clock.start();
-    this.loop();
+    this.lastFrameTimestamp = performance.now();
+    this.animationFrameId = requestAnimationFrame(this.loop);
   }
 
   stop() {
@@ -666,10 +675,52 @@ export class CityGameEngine {
     }
   }
 
-  private loop = () => {
+  public setTargetFps(fps: number) {
+    this.targetFps = Math.max(30, Math.min(120, fps));
+    this.minFrameTimeMs = 1000 / this.targetFps;
+  }
+
+  private loop = (timestamp?: number) => {
     if (!this.isRunning) return;
     this.animationFrameId = requestAnimationFrame(this.loop);
-    this.tick(this.clock.getDelta(), true);
+
+    const now = typeof timestamp === 'number' ? timestamp : performance.now();
+    const elapsed = now - this.lastFrameTimestamp;
+
+    // Thermal & frame rate pacing:
+    // On high-refresh displays (120Hz ProMotion / AMOLED, interval ~8.33ms), skip alternating frames to cap at 60 FPS.
+    // On standard 60Hz/75Hz displays (interval >= 13ms), NEVER skip frames (elapsed < 11.5ms is false), ensuring 100% smooth stutter-free motion.
+    if (this.targetFps <= 60 && elapsed < 11.5) {
+      return;
+    }
+
+    this.lastFrameTimestamp = now;
+    const rawDelta = this.clock.getDelta();
+    // Clamp delta between 0.001s and 0.034s to prevent any physics/camera micro-stutter
+    const delta = Math.min(rawDelta, 0.034);
+    this.tick(delta, true);
+  };
+
+  private onVisibilityChange = () => {
+    if (document.hidden) {
+      // Tab hidden: pause clock and render loop to eliminate background CPU/GPU heating
+      if (this.isRunning) {
+        this.clock.stop();
+        if (this.animationFrameId !== null) {
+          cancelAnimationFrame(this.animationFrameId);
+          this.animationFrameId = null;
+        }
+      }
+    } else {
+      // Tab visible: resume clock and loop smoothly without time delta spikes
+      if (this.isRunning && !this.isDisposed) {
+        this.clock.start();
+        this.lastFrameTimestamp = performance.now();
+        if (this.animationFrameId === null) {
+          this.animationFrameId = requestAnimationFrame(this.loop);
+        }
+      }
+    }
   };
 
   /**
@@ -939,12 +990,12 @@ export class CityGameEngine {
       this.vehicleController.updateSuspensionSpring(dt);
       this.lightingManager.updateCarPosition(this.playerController.position);
     } else if (this.playerMode === 'on_foot') {
-      this.playerController.update(controls, delta, this.cameraSystem.camera, footColliders, this.cityEnv.walkableMeshes);
+      this.playerController.update(controls, dt, this.cameraSystem.camera, footColliders, this.cityEnv.walkableMeshes);
       this.cameraSystem.updateCharacter(
         this.playerController.position,
         this.playerController.heading,
         this.playerController.isSprinting || this.playerController.isAfterburner,
-        delta,
+        dt,
         staticColliders
       );
 
@@ -954,11 +1005,9 @@ export class CityGameEngine {
       // Parachute container pack visibility (on back when airborne or deployed)
       this.playerCharacter.parachutePackMesh.visible = !pc.isJetpackOn && (pc.isParachuteOpen || (!pc.isGrounded && pc.altitude > 1.8));
       if (pc.isJetpackOn && pc.thrust01 > 0.1) {
-        const nozzleL = new THREE.Vector3();
-        const nozzleR = new THREE.Vector3();
-        this.playerCharacter.getJetExhaustPositions(nozzleL, nozzleR);
-        this.smokeEffects.emitExhaust(nozzleL, pc.thrust01, dt);
-        this.smokeEffects.emitExhaust(nozzleR, pc.thrust01, dt);
+        this.playerCharacter.getJetExhaustPositions(this._jetNozzleL, this._jetNozzleR);
+        this.smokeEffects.emitExhaust(this._jetNozzleL, pc.thrust01, dt);
+        this.smokeEffects.emitExhaust(this._jetNozzleR, pc.thrust01, dt);
       }
       audioManager.updateJetpack(pc.isJetpackOn, pc.thrust01, pc.isAfterburner);
 
@@ -977,7 +1026,7 @@ export class CityGameEngine {
         };
         this.vehicleController.update(
           EMPTY_CONTROLS,
-          delta,
+          dt,
           staticColliders,
           (impactPos, impactNormal, intensity) => {
             this.impactEffects.emit(impactPos, impactNormal, Math.round(22 * intensity));
@@ -996,7 +1045,7 @@ export class CityGameEngine {
     } else if (this.playerMode === 'driving') {
       this.vehicleController.update(
         controls,
-        delta,
+        dt,
         staticColliders,
         (impactPos, impactNormal, intensity) => {
           this.impactEffects.emit(impactPos, impactNormal, Math.round(22 * intensity));
@@ -1029,7 +1078,7 @@ export class CityGameEngine {
         this.vehicleController.position,
         this.vehicleController.rootGroup.quaternion,
         this.vehicleController.speedKmh,
-        delta,
+        dt,
         this.vehicleController.yawRate,
         this.vehicleController.isDrifting,
         this.vehicleController.isBoosting
@@ -1307,24 +1356,29 @@ export class CityGameEngine {
   }
 
   applyGraphicsQuality(quality: GraphicsQuality) {
+    const isMobile = isMobileDevice();
     if (quality === 'low') {
       this.renderer.shadowMap.enabled = false;
       this.renderer.setPixelRatio(1.0);
       this.trafficManager.setMaxCars(6);
       this.pedestrianManager.setMaxPedestrians(10);
       this.lightingManager.setSunShadows(false);
+      this.lightingManager.setDynamicStreetLightsQuality('low');
     } else if (quality === 'medium') {
       this.renderer.shadowMap.enabled = true;
       this.renderer.setPixelRatio(1.0);
       this.trafficManager.setMaxCars(10);
       this.pedestrianManager.setMaxPedestrians(20);
       this.lightingManager.setSunShadows(true);
+      this.lightingManager.setDynamicStreetLightsQuality('medium');
     } else {
       this.renderer.shadowMap.enabled = true;
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+      const maxDpr = isMobile ? 1.15 : 1.25;
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxDpr));
       this.trafficManager.setMaxCars(14);
       this.pedestrianManager.setMaxPedestrians(32);
       this.lightingManager.setSunShadows(true);
+      this.lightingManager.setDynamicStreetLightsQuality('high');
     }
   }
 
@@ -1439,7 +1493,8 @@ export class CityGameEngine {
     this.cameraSystem.setAspect(width / height);
     this.renderer.setSize(width, height);
     const isMobile = isMobileDevice();
-    const maxDpr = isMobile ? 1.35 : 2.0;
+    const quality = useGameStore.getState().graphicsQuality;
+    const maxDpr = quality === 'high' ? (isMobile ? 1.15 : 1.25) : 1.0;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxDpr));
   };
 
@@ -1448,6 +1503,7 @@ export class CityGameEngine {
     this.stop();
     audioManager.updateJetpack(false, 0, false);
     window.removeEventListener('resize', this.onWindowResize);
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
     this.scene.remove(this.playerCharacter.rootGroup);
     this.missionManager.dispose();
     this.missions.dispose();
