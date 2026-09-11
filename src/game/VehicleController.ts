@@ -7,7 +7,7 @@ import { CityTextures } from './CityTextures';
 import { createBusModel } from './models/BusModelBuilder';
 
 export const PLAYER_SPAWN_X = 0.0;
-export const DEFAULT_SPAWN_POS = new THREE.Vector3(0.0, 0.05, 5.0);
+export const DEFAULT_SPAWN_POS = new THREE.Vector3(0.0, 0.0, 5.0);
 
 export const GRAVITY = 9.81;
 
@@ -1209,10 +1209,10 @@ export class VehicleController {
       result.rr.copy(this.rootGroup.localToWorld(new THREE.Vector3(halfW, 0.28, rearZ)));
     }
 
-    result.fl.y = 0.022;
-    result.fr.y = 0.022;
-    result.rl.y = 0.022;
-    result.rr.y = 0.022;
+    result.fl.y = 0.003;
+    result.fr.y = 0.003;
+    result.rl.y = 0.003;
+    result.rr.y = 0.003;
 
     return result;
   }

@@ -104,7 +104,7 @@ export class VehicleInteraction {
     const leftZ = Math.sin(heading);
     return new THREE.Vector3(
       carPos.x + leftX * (halfWidth + 0.85),
-      0.05,
+      carPos.y,
       carPos.z + leftZ * (halfWidth + 0.85)
     );
   }
@@ -252,7 +252,7 @@ export class VehicleInteraction {
       const rightZ = -Math.sin(heading);
       const rightDoor = new THREE.Vector3(
         carPos.x + rightX * (halfW + 0.85),
-        0.05,
+        carPos.y,
         carPos.z + rightZ * (halfW + 0.85)
       );
 
@@ -269,7 +269,7 @@ export class VehicleInteraction {
         }
       }
 
-      finalExitPos = isRightBlocked ? new THREE.Vector3(carPos.x, 0.05, carPos.z - 2.5) : rightDoor;
+      finalExitPos = isRightBlocked ? new THREE.Vector3(carPos.x, carPos.y, carPos.z - 2.5) : rightDoor;
     }
 
     this.playerController.setPosition(finalExitPos, heading);

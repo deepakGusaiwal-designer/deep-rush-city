@@ -11,7 +11,7 @@ import { MissionDefinition, MapBlip, PlayerMode } from '../types/game';
 
 const poiWorld = (id: string): THREE.Vector3 => {
   const poi = CITY_POIS.find((p) => p.id === id) ?? CITY_POIS[0];
-  return new THREE.Vector3(poi.position[0] * CITY_SCALE, 0.05, poi.position[2] * CITY_SCALE);
+  return new THREE.Vector3(poi.position[0] * CITY_SCALE, 0.25, poi.position[2] * CITY_SCALE);
 };
 
 const GARAGE = poiWorld('city-garage');

@@ -231,7 +231,7 @@ export class PlayerController {
     colliders: THREE.Box3[],
     walkableMeshes?: THREE.Mesh[]
   ): number {
-    let ground = 0.02;
+    let ground = 0.00;
 
     // 1. Raycast downwards against visual meshes (exact triangles: roofs, slopes, steps, plazas, bridges)
     if (walkableMeshes && walkableMeshes.length > 0) {
@@ -247,10 +247,10 @@ export class PlayerController {
         const hit = hits[i];
         // Ensure surface is upward-facing so we don't land on vertical walls or underside ceilings
         if (hit.face && hit.face.normal.y < 0.25) continue;
-        // Curbs and sidewalk tiles are ~0.22m high; walking character can step up max 0.35m.
+        // Curbs and sidewalk tiles are ~0.25m high; walking character can step up max 0.35m.
         // Higher step-ups (> 0.35m) require jumping or falling from above.
         const maxStepUp = this.isGrounded ? 0.35 : 1.5;
-        if (hit.point.y <= feetY + maxStepUp && hit.point.y > ground) {
+        if (hit.point.y <= feetY + maxStepUp) {
           ground = hit.point.y;
           break;
         }
@@ -269,18 +269,18 @@ export class PlayerController {
         if (b.min.x > 50 && b.max.x < 115) {
           if (b.min.z > 60) {
             // TwistedTower
-            roofY = 105.30;
+            roofY = 105.55;
           } else if (b.min.z > -60 && b.max.z < 30) {
             // Grid005
-            roofY = 125.46;
+            roofY = 125.71;
           } else if (b.min.z < -60) {
             // Terrace008
-            roofY = z > -76 ? 24.48 : (z > -96 ? 34.6 : 47.96);
+            roofY = z > -76 ? 24.73 : (z > -96 ? 34.85 : 48.21);
           }
         } else if (b.min.x < -10) {
           // Slope buildings
           const t = THREE.MathUtils.clamp((x - (-15.1)) / (-112.0 - (-15.1)), 0, 1);
-          roofY = 50.0 + t * 93.5;
+          roofY = 50.25 + t * 93.5;
         }
 
         const maxStepUp = this.isGrounded ? 0.35 : 1.5;

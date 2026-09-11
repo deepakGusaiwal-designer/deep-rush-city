@@ -315,7 +315,7 @@ export class CabPassengerNPC {
     // Target spot on sidewalk ~3.8 meters away to the right of the car
     this.exitSidewalkPos.set(
       carPos.x + rightX * 3.8 + forwardX * 0.25,
-      carPos.y,
+      0.25,
       carPos.z + rightZ * 3.8 + forwardZ * 0.25
     );
 

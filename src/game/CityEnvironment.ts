@@ -409,6 +409,9 @@ export class CityEnvironment {
         (gltf) => {
           const cityModel = gltf.scene;
           cityModel.scale.set(CITY_SCALE, CITY_SCALE, CITY_SCALE);
+          // Elevate cityModel so asphalt roadbed (-0.25m in GLTF) sits exactly at y = 0.00m,
+          // and sidewalk curbs sit elevated at y = 0.25m
+          cityModel.position.y = 0.25;
           cityModel.updateMatrixWorld(true);
 
           cityModel.traverse((node) => {
@@ -454,7 +457,8 @@ export class CityEnvironment {
               const mesh = node as THREE.Mesh;
               mesh.castShadow = true;
               mesh.receiveShadow = true;
-              if (node.visible && CityEnvironment.isWalkableMesh(name)) {
+              const parentName = node.parent ? (node.parent.name || '') : '';
+              if (node.visible && (CityEnvironment.isWalkableMesh(name) || CityEnvironment.isWalkableMesh(parentName))) {
                 this.walkableMeshes.push(mesh);
               }
 
@@ -721,10 +725,10 @@ export class CityEnvironment {
       });
 
       const busStopPositions = [
-        { x: -22.5, y: 0.1, z: -15.0, rotY: Math.PI / 2 },
-        { x: -18.2, y: 0.1, z: 25.0, rotY: Math.PI / 2 },
-        { x: 38.5, y: 0.1, z: 85.0, rotY: -Math.PI / 2 },
-        { x: 38.5, y: 0.1, z: -95.0, rotY: -Math.PI / 2 },
+        { x: -22.5, y: 0.25, z: -15.0, rotY: Math.PI / 2 },
+        { x: -18.2, y: 0.25, z: 25.0, rotY: Math.PI / 2 },
+        { x: 38.5, y: 0.25, z: 85.0, rotY: -Math.PI / 2 },
+        { x: 38.5, y: 0.25, z: -95.0, rotY: -Math.PI / 2 },
       ];
 
       for (const pos of busStopPositions) {
@@ -749,7 +753,7 @@ export class CityEnvironment {
       const gltf = await loader.loadAsync('/models/props/Fountain_03.glb');
       const fountain = gltf.scene;
       fountain.scale.set(CITY_SCALE * 1.2, CITY_SCALE * 1.2, CITY_SCALE * 1.2);
-      fountain.position.set(-31.5, 0.1, 75.5);
+      fountain.position.set(-31.5, 0.25, 75.5);
       fountain.traverse((c) => {
         if ((c as THREE.Mesh).isMesh) {
           c.castShadow = true;
@@ -806,7 +810,7 @@ export class CityEnvironment {
       ];
       for (const spot of palmSpots) {
         const palm = palmTemplate.clone(true);
-        palm.position.set(spot.x, 0.1, spot.z);
+        palm.position.set(spot.x, 0.25, spot.z);
         palm.rotation.y = Math.random() * Math.PI * 2;
         palm.updateMatrixWorld(true);
         propsGroup.add(palm);
@@ -843,7 +847,7 @@ export class CityEnvironment {
       ];
       for (const spot of trashSpots) {
         const bin = trashTemplate.clone(true);
-        bin.position.set(spot.x, 0.1, spot.z);
+        bin.position.set(spot.x, 0.25, spot.z);
         bin.updateMatrixWorld(true);
         propsGroup.add(bin);
 
@@ -888,7 +892,11 @@ export class CityEnvironment {
         const walkable: THREE.Mesh[] = [];
         chunkGroup.traverse((node) => {
           if ((node as THREE.Mesh).isMesh && node.visible) {
-            walkable.push(node as THREE.Mesh);
+            const name = node.name || '';
+            const parentName = node.parent ? (node.parent.name || '') : '';
+            if (CityEnvironment.isWalkableMesh(name) || CityEnvironment.isWalkableMesh(parentName)) {
+              walkable.push(node as THREE.Mesh);
+            }
           }
         });
 

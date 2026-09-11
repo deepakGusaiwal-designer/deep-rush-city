@@ -217,6 +217,21 @@ export class SmokeEffects {
     this.geometry.attributes.alpha.needsUpdate = true;
   }
 
+  public clear(): void {
+    this.puffs = [];
+    for (let i = 0; i < this.maxPuffs; i++) {
+      const idx = i * 3;
+      this.positions[idx] = 0;
+      this.positions[idx + 1] = -100;
+      this.positions[idx + 2] = 0;
+      this.sizes[i] = 0;
+      this.alphas[i] = 0;
+    }
+    this.geometry.attributes.position.needsUpdate = true;
+    this.geometry.attributes.size.needsUpdate = true;
+    this.geometry.attributes.alpha.needsUpdate = true;
+  }
+
   dispose() {
     this.scene.remove(this.points);
     this.geometry.dispose();

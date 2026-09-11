@@ -227,7 +227,7 @@ export class PlayerCharacter {
     // 2. TORSO & VIBRANT HERO BOMBER JACKET
     // =========================================================================
     this.torsoGroup = new THREE.Group();
-    this.torsoGroup.position.set(0, 0.86, 0);
+    this.torsoGroup.position.set(0, 0.904, 0);
     this.bodyGroup.add(this.torsoGroup);
 
     // Anatomical V-Taper Torso (Athletic Chest)
@@ -1002,7 +1002,7 @@ export class PlayerCharacter {
       depthWrite: false,
     });
     this.contactShadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
-    this.contactShadowMesh.position.y = 0.005;
+    this.contactShadowMesh.position.y = 0.002;
     this.rootGroup.add(this.contactShadowMesh);
   }
 

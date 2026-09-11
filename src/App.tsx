@@ -26,6 +26,7 @@ import { OrientationLock } from './components/HUD/OrientationLock';
 import { ActivitiesDropdown } from './components/HUD/ActivitiesDropdown';
 import { MultiplayerChat } from './components/HUD/MultiplayerChat';
 import { CarMeetInspectModal } from './components/HUD/CarMeetInspectModal';
+import { ResetConfirmModal } from './components/HUD/ResetConfirmModal';
 import { ChatMessage, CarMeetInspectData } from './game/multiplayer/MultiplayerTypes';
 import { VehicleModelId } from './types/game';
 
@@ -188,8 +189,13 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  // Handle reset car position
+  // Handle request to reset game (shows confirmation modal)
   const handleResetCar = () => {
+    useGameStore.getState().setResetConfirmOpen(true);
+  };
+
+  // Handle confirmed reset from modal
+  const handleConfirmReset = () => {
     if (engineRef.current) {
       engineRef.current.resetCar();
     }
@@ -331,6 +337,9 @@ export const App: React.FC = () => {
 
       {/* Garage Vehicle Selector Modal (for POI / legacy trigger) */}
       <CarSelectorModal onSelectCar={handleSelectVehicle} />
+
+      {/* Reset Game Confirmation Modal (R) */}
+      <ResetConfirmModal onConfirm={handleConfirmReset} />
 
       {/* Mission Board (M) */}
       <MissionMenu

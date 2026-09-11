@@ -178,6 +178,8 @@ interface GameState {
   // UI Modals
   isGarageOpen: boolean;
   setGarageOpen: (open: boolean) => void;
+  isResetConfirmOpen: boolean;
+  setResetConfirmOpen: (open: boolean) => void;
   activePOI: POI | null;
   setActivePOI: (poi: POI | null) => void;
   discoveredPOIs: string[];
@@ -408,6 +410,9 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   isGarageOpen: false,
   setGarageOpen: (open) => set({ isGarageOpen: open }),
+
+  isResetConfirmOpen: false,
+  setResetConfirmOpen: (open) => set({ isResetConfirmOpen: open }),
 
   activePOI: null,
   setActivePOI: (poi) => set({ activePOI: poi }),

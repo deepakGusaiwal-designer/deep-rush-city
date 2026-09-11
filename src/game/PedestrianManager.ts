@@ -519,7 +519,7 @@ export class PedestrianManager {
     });
     const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
     shadowMesh.rotation.x = -Math.PI / 2;
-    shadowMesh.position.set(0, 0.005, 0);
+    shadowMesh.position.set(0, 0.003, 0);
     shadowMesh.renderOrder = 2;
     root.add(shadowMesh);
 
@@ -576,7 +576,7 @@ export class PedestrianManager {
 
     return {
       segment: seg,
-      position: new THREE.Vector3(posX, 0.0, posZ),
+      position: new THREE.Vector3(posX, 0.25, posZ),
       heading,
       direction: dir,
     };
@@ -855,8 +855,8 @@ export class PedestrianManager {
         p.stateTimer += dt;
 
         // Ground landing recovery
-        if (p.position.y <= 0.0 && p.tumbleVelocity.y < 0) {
-          p.position.y = 0.0;
+        if (p.position.y <= 0.25 && p.tumbleVelocity.y < 0) {
+          p.position.y = 0.25;
           p.tumbleVelocity.set(0, 0, 0);
           p.root.rotation.set(0, p.heading, 0);
           p.state = 'waiting';
@@ -871,7 +871,7 @@ export class PedestrianManager {
         // Physical stagger back with friction
         p.staggerVelocity.y = 0;
         p.position.addScaledVector(p.staggerVelocity, dt);
-        p.position.y = 0.0;
+        p.position.y = 0.25;
         p.staggerVelocity.multiplyScalar(0.88);
 
         // Keep smoothly pulled towards sidewalk corridor

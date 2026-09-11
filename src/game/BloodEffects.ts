@@ -291,7 +291,7 @@ export class BloodEffects {
     dir: THREE.Vector3,
     count: number = 28,
     speed: number = 6.0,
-    floorY: number = 0.02
+    floorY: number = 0.00
   ) {
     const baseDir = dir.clone().normalize();
     const actualCount = Math.min(count, this.maxParticles - this.particles.length);
@@ -322,7 +322,7 @@ export class BloodEffects {
         life: 0,
         maxLife: 0.85 + Math.random() * 0.55,
         size: 0.28 + Math.random() * 0.35,
-        floorY: Math.max(0.02, floorY),
+        floorY: Math.max(0.00, floorY),
       });
     }
   }
@@ -338,8 +338,8 @@ export class BloodEffects {
     this.poolNextIndex = (this.poolNextIndex + 1) % BloodEffects.MAX_POOLS;
 
     const surfaceY = floorY !== undefined ? floorY : pos.y;
-    // Slight offset above ground to avoid Z-fighting (0.015 - 0.025m)
-    const decalY = Math.max(0.018, surfaceY + 0.018);
+    // Slight offset above ground to avoid Z-fighting (0.003 - 0.005m)
+    const decalY = Math.max(0.003, surfaceY + 0.003);
 
     const pool = this.pools[idx];
     pool.active = true;

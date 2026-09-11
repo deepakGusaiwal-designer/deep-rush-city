@@ -424,7 +424,7 @@ export class LightingManager {
       side: THREE.DoubleSide,
     });
     this.groundDecalMesh = new THREE.Mesh(groundGeo, this.groundDecalMat);
-    this.groundDecalMesh.position.set(0, 0.038, frontZ + 0.1);
+    this.groundDecalMesh.position.set(0, 0.005, frontZ + 0.1);
     lightsGroup.add(this.groundDecalMesh);
 
     // 2. Real forward SpotLights & targets
@@ -517,7 +517,7 @@ export class LightingManager {
     if (this.tailFlareR) this.tailFlareR.position.set(halfW, 0.52, rearZ - 0.05);
 
     if (this.groundDecalMesh) {
-      this.groundDecalMesh.position.set(0, 0.038, frontZ + 0.1);
+      this.groundDecalMesh.position.set(0, 0.005, frontZ + 0.1);
     }
   }
 
@@ -574,7 +574,7 @@ export class LightingManager {
       // Asphalt Ground Decal: Expansive 36-meter warm road pool
       if (this.groundDecalMesh && this.groundDecalMat) {
         this.groundDecalMesh.visible = !isNight && !isSunset ? false : true;
-        this.groundDecalMesh.position.set(0, 0.038, frontZ + 0.1);
+        this.groundDecalMesh.position.set(0, 0.005, frontZ + 0.1);
         this.groundDecalMesh.scale.set(18.0, 1.0, 36.0);
         this.groundDecalMat.color.setHex(0xfffae8);
         this.groundDecalMat.opacity = isNight ? 0.90 : isSunset ? 0.60 : 0.0;
@@ -625,7 +625,7 @@ export class LightingManager {
       // Asphalt Ground Decal: Brilliant 75-meter high-beam projection
       if (this.groundDecalMesh && this.groundDecalMat) {
         this.groundDecalMesh.visible = !isNight && !isSunset ? false : true;
-        this.groundDecalMesh.position.set(0, 0.038, frontZ + 0.1);
+        this.groundDecalMesh.position.set(0, 0.005, frontZ + 0.1);
         this.groundDecalMesh.scale.set(26.0, 1.0, 75.0);
         this.groundDecalMat.color.setHex(0xf0f8ff);
         this.groundDecalMat.opacity = isNight ? 1.0 : isSunset ? 0.75 : 0.0;

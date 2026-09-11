@@ -635,6 +635,7 @@ export const ControlsOverlay: React.FC<ControlsOverlayProps> = ({
         const s = useGameStore.getState();
         if (s.isMissionMenuOpen) s.setMissionMenuOpen(false);
         if (s.isCustomsOpen) s.setCustomsOpen(false);
+        if (s.isResetConfirmOpen) s.setResetConfirmOpen(false);
       }
     };
 

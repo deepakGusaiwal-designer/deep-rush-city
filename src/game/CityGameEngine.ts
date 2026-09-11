@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { VehicleController, DEFAULT_SPAWN_POS } from './VehicleController';
 import { CityEnvironment } from './CityEnvironment';
 
-export const PROTAGONIST_SPAWN_POS = new THREE.Vector3(2.2, 0.02, 5.0);
+export const PROTAGONIST_SPAWN_POS = new THREE.Vector3(2.2, 0.0, 5.0);
 import { FollowCamera } from './FollowCamera';
 import { LightingManager } from './LightingManager';
 import { DynamicSky } from './DynamicSky';
@@ -536,17 +536,17 @@ export class CityGameEngine {
       }
       return true;
     };
-    if (isClear(pos.x, pos.z)) return new THREE.Vector3(pos.x, 0.02, pos.z);
+    if (isClear(pos.x, pos.z)) return new THREE.Vector3(pos.x, 0.0, pos.z);
     for (let r = 2; r <= maxRadius; r += 2) {
       const steps = Math.max(8, Math.round(r * 2));
       for (let s = 0; s < steps; s++) {
         const a = (s / steps) * Math.PI * 2;
         const x = pos.x + Math.cos(a) * r;
         const z = pos.z + Math.sin(a) * r;
-        if (isClear(x, z)) return new THREE.Vector3(x, 0.02, z);
+        if (isClear(x, z)) return new THREE.Vector3(x, 0.0, z);
       }
     }
-    return new THREE.Vector3(pos.x, 0.02, pos.z);
+    return new THREE.Vector3(pos.x, 0.0, pos.z);
   }
 
   private respawn() {
@@ -1381,17 +1381,29 @@ export class CityGameEngine {
   resetCar() {
     if (this.isDown) return;
     const store = useGameStore.getState();
-    const wasDamaged = this.vehicleController.health < 100;
     this.vehicleController.repair();
     store.setVehicleHealth(100);
     this.vehicleController.resetPosition(DEFAULT_SPAWN_POS, 0);
+
+    // Reset character vitals and wanted status
+    this.health = 100;
+    this.armor = 0;
+    this.regenTimer = 0;
+    store.setVitals(this.health, this.armor);
+    this.wanted.clear();
+    this.police.clearAll();
+    store.setWanted(0, 0);
+    this.smokeEffects.clear();
+
     if (this.playerMode === 'on_foot' || this.playerMode === 'entering_vehicle') {
       this.playerController.setPosition(PROTAGONIST_SPAWN_POS.clone(), 0);
       this.cameraSystem.snapFootFollow(PROTAGONIST_SPAWN_POS);
       this.playerMode = 'on_foot';
       this.playerCharacter.setVisible(true);
+    } else {
+      this.cameraSystem.snapCarFollow(DEFAULT_SPAWN_POS);
     }
-    if (wasDamaged) store.pushNotification('Vehicle reset & repaired.', 'info');
+    store.pushNotification('Game & vehicle reset successfully.', 'info');
   }
 
   teleportToCarMeet() {

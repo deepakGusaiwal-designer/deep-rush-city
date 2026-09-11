@@ -193,7 +193,7 @@ export class MissionManager {
 
     const destX = destPOI.position[0] * CITY_SCALE;
     const destZ = destPOI.position[2] * CITY_SCALE;
-    this.currentDropoffPos.set(destX, 0.05, destZ);
+    this.currentDropoffPos.set(destX, 0.25, destZ);
 
     const tripDistance = Math.hypot(destX - pickupSpot.x, destZ - pickupSpot.z);
     const timeLimit = Math.max(45, Math.round(tripDistance / 11.5) + 20);
@@ -207,7 +207,7 @@ export class MissionManager {
       passengerName: profile.name,
       passengerQuote: profile.quote,
       pickupPos: [pickupSpot.x, pickupSpot.y, pickupSpot.z],
-      dropoffPos: [destX, 0.05, destZ],
+      dropoffPos: [destX, 0.25, destZ],
       destinationName: destPOI.name,
       timeLimit,
       timeRemaining: timeLimit,
@@ -241,7 +241,7 @@ export class MissionManager {
       x = (Math.random() * 100 - 50) * (CITY_SCALE * 0.65);
     }
 
-    return new THREE.Vector3(x, 0.05, z);
+    return new THREE.Vector3(x, 0.25, z);
   }
 
   // Main tick loop called each frame

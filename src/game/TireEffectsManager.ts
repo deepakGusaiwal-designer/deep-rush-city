@@ -486,7 +486,7 @@ export class TireEffectsManager {
 
     const seg = this.groundFireSegments[idx];
     seg.active = true;
-    seg.position.set((p0.x + p1.x) * 0.5, 0.026, (p0.z + p1.z) * 0.5);
+    seg.position.set((p0.x + p1.x) * 0.5, 0.006, (p0.z + p1.z) * 0.5);
     seg.heading = Math.atan2(dx, dz);
     seg.age = 0;
     seg.maxAge = 0.85;
@@ -515,7 +515,7 @@ export class TireEffectsManager {
 
     const seg = this.skidSegments[idx];
     seg.active = true;
-    seg.position.set((p0.x + p1.x) * 0.5, 0.022, (p0.z + p1.z) * 0.5);
+    seg.position.set((p0.x + p1.x) * 0.5, 0.004, (p0.z + p1.z) * 0.5);
     seg.heading = Math.atan2(dx, dz);
     seg.length = len * 1.08; // 8% overlap to guarantee zero gaps
     seg.age = 0;
