@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { CityGameEngine, WebGLUnavailableError } from './game/CityGameEngine';
 import { WebGLErrorScreen } from './components/WebGLErrorScreen';
 import { useGameStore } from './store/useGameStore';
@@ -455,6 +456,7 @@ export const App: React.FC = () => {
           </div>
         </div>
       )}
+      <Analytics />
     </div>
   );
 };
